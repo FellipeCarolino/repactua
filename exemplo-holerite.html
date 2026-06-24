@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Contracheque de Exemplo — Teste da Calculadora</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; background: #e9edf2; color: #1c2b3a; padding: 24px; }
+  .folha {
+    width: 760px; margin: 0 auto; background: #fff; border: 1px solid #bbb;
+    padding: 28px 32px;
+  }
+  .topo { display: flex; align-items: center; gap: 16px; border-bottom: 2px solid #1a3a5c; padding-bottom: 12px; }
+  .brasao { width: 56px; height: 56px; border-radius: 50%; background: #1a3a5c; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 26px; }
+  .topo h1 { font-size: 1.05rem; color: #1a3a5c; }
+  .topo p { font-size: 0.78rem; color: #555; }
+  .ref { margin-left: auto; text-align: right; font-size: 0.8rem; color: #555; }
+  .dados-serv { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px 20px; margin: 16px 0; font-size: 0.82rem; }
+  .dados-serv b { color: #1a3a5c; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.82rem; }
+  th { background: #1a3a5c; color: #fff; text-align: left; padding: 7px 10px; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.4px; }
+  td { padding: 6px 10px; border-bottom: 1px solid #eee; }
+  td.v { text-align: right; font-variant-numeric: tabular-nums; }
+  .secao-titulo { margin-top: 18px; font-weight: 700; color: #1a3a5c; font-size: 0.86rem; }
+  tfoot td { font-weight: 700; background: #f0f3f8; border-top: 2px solid #1a3a5c; }
+  .resumo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+  .box { border: 1px solid #ccc; border-radius: 6px; padding: 12px; text-align: center; }
+  .box .l { font-size: 0.72rem; color: #777; text-transform: uppercase; }
+  .box .n { font-size: 1.1rem; font-weight: 800; color: #1a3a5c; }
+  .liquido { background: #eef6ee; border-color: #7ec891; }
+  .liquido .n { color: #1e7e34; }
+  .rodape { margin-top: 18px; font-size: 0.72rem; color: #888; text-align: center; }
+  @media print { body { background: #fff; padding: 0; } .folha { border: none; width: 100%; } }
+</style>
+</head>
+<body>
+<div class="folha">
+  <div class="topo">
+    <div class="brasao">⚖️</div>
+    <div>
+      <h1>UNIÃO FEDERAL — SECRETARIA DE GESTÃO DE PESSOAS</h1>
+      <p>Sistema Integrado de Administração de Pessoal — Demonstrativo de Pagamento</p>
+    </div>
+    <div class="ref">
+      Competência: <b>MAIO/2026</b><br>
+      Matrícula: 1234567<br>
+      Documento de exemplo (teste)
+    </div>
+  </div>
+
+  <div class="dados-serv">
+    <div><b>Nome:</b> MARIA APARECIDA DOS SANTOS</div>
+    <div><b>Cargo:</b> Analista</div>
+    <div><b>Vínculo:</b> Estatutário</div>
+    <div><b>CPF:</b> 123.456.789-00</div>
+    <div><b>Lotação:</b> Brasília/DF</div>
+    <div><b>Admissão:</b> 02/2012</div>
+  </div>
+
+  <div class="secao-titulo">PROVENTOS (RENDIMENTOS)</div>
+  <table>
+    <thead><tr><th>Cód.</th><th>Discriminação</th><th style="text-align:right">Valor (R$)</th></tr></thead>
+    <tbody>
+      <tr><td>0001</td><td>Vencimento Básico</td><td class="v">8.200,00</td></tr>
+      <tr><td>0152</td><td>Gratificação de Desempenho</td><td class="v">2.300,00</td></tr>
+      <tr><td>0210</td><td>Adicional de Qualificação</td><td class="v">900,00</td></tr>
+      <tr><td>0301</td><td>Auxílio-Alimentação</td><td class="v">1.000,00</td></tr>
+    </tbody>
+    <tfoot><tr><td colspan="2">TOTAL DE PROVENTOS</td><td class="v">12.400,00</td></tr></tfoot>
+  </table>
+
+  <div class="secao-titulo">DESCONTOS</div>
+  <table>
+    <thead><tr><th>Cód.</th><th>Discriminação</th><th style="text-align:right">Valor (R$)</th></tr></thead>
+    <tbody>
+      <tr><td>1001</td><td>Contribuição PSS / Previdência</td><td class="v">1.180,00</td></tr>
+      <tr><td>1010</td><td>Imposto de Renda Retido na Fonte (IRRF)</td><td class="v">1.450,00</td></tr>
+      <tr><td>1100</td><td>Pensão Alimentícia Judicial</td><td class="v">1.240,00</td></tr>
+      <tr><td>2001</td><td>Empréstimo Consignado — Banco do Brasil</td><td class="v">980,00</td></tr>
+      <tr><td>2002</td><td>Empréstimo Consignado — Caixa Econômica Federal</td><td class="v">1.120,00</td></tr>
+      <tr><td>1500</td><td>Plano de Saúde (coparticipação)</td><td class="v">320,00</td></tr>
+    </tbody>
+    <tfoot><tr><td colspan="2">TOTAL DE DESCONTOS</td><td class="v">6.290,00</td></tr></tfoot>
+  </table>
+
+  <div class="resumo">
+    <div class="box"><div class="l">Total Proventos</div><div class="n">R$ 12.400,00</div></div>
+    <div class="box"><div class="l">Total Descontos</div><div class="n">R$ 6.290,00</div></div>
+    <div class="box liquido"><div class="l">Líquido a Receber</div><div class="n">R$ 6.110,00</div></div>
+  </div>
+
+  <div class="rodape">
+    Documento fictício gerado apenas para testar a leitura automática da Calculadora de Superendividamento.<br>
+    Para gerar o PDF: abra este arquivo no navegador e use Imprimir → "Salvar como PDF".
+  </div>
+</div>
+</body>
+</html>
