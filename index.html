@@ -536,6 +536,15 @@
       padding: 14px;
       background: #fafbfd;
     }
+    .cenarios-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    @media (max-width: 640px) { .cenarios-grid { grid-template-columns: 1fr; } }
+    .cenario-box { border: 1.5px solid var(--border); border-radius: 8px; padding: 14px; text-align: center; background: #fafbfd; }
+    .cenario-box.destaque { border-color: var(--success); background: #f1faf3; }
+    .cenario-nome { font-size: 0.78rem; font-weight: 700; color: var(--primary); min-height: 32px; display: flex; align-items: center; justify-content: center; }
+    .cenario-parcela { font-size: 1.3rem; font-weight: 800; color: var(--primary); margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+    .cenario-parcela span { font-size: 0.7rem; font-weight: 600; color: var(--text-muted); }
+    .cenario-info { font-size: 0.78rem; color: var(--text-muted); }
+
     .plano-lbl { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); font-weight: 600; }
     .plano-val { font-size: 1.15rem; font-weight: 800; color: var(--primary); margin-top: 6px; }
     .plano-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 3px; }
@@ -2170,6 +2179,39 @@
     const parcelaSugeridaPct = r.rendaLiquida > 0 ? (parcelaSugerida / r.rendaLiquida) * 100 : 0;
     const dentroDe30a35 = parcelaSugeridaPct >= 30 && parcelaSugeridaPct <= 35;
 
+    // ---- Cenários lado a lado (para o advogado escolher a tese) ----
+    const cenarios = [
+      { nome: 'Conservador (30% da renda)', parcela: cap30, pctRenda: 30,
+        meses: cap30 > 0 ? Math.ceil(totalSaldo / cap30) : null },
+      { nome: 'Teto legal (35% da renda)', parcela: cap35, pctRenda: 35,
+        meses: cap35 > 0 ? Math.ceil(totalSaldo / cap35) : null },
+      { nome: 'Quitação em 60 meses', parcela: parcelaPor60, meses: PRAZO_MAX,
+        pctRenda: r.rendaLiquida > 0 ? (parcelaPor60 / r.rendaLiquida) * 100 : 0 },
+    ];
+
+    // ---- Divisão da parcela sugerida por credor (proporcional ao saldo) ----
+    let distribuicao = [];
+    if (parcelaSugerida > 0 && totalSaldo > 0) {
+      let acumulado = 0;
+      dividas.forEach((d, idx) => {
+        const saldo = d.saldoCents || 0;
+        let fatia;
+        if (idx === dividas.length - 1) {
+          fatia = parcelaSugerida - acumulado; // última recebe o ajuste do arredondamento
+        } else {
+          fatia = Math.round(parcelaSugerida * (saldo / totalSaldo));
+          acumulado += fatia;
+        }
+        distribuicao.push({
+          credor: d.credor || 'Credor',
+          tipo: getTipo(d.tipo).label,
+          saldo: saldo,
+          pctSaldo: (saldo / totalSaldo) * 100,
+          fatia: Math.max(fatia, 0),
+        });
+      });
+    }
+
     // SITUAÇÃO (art. 54-A, §1º CDC):
     // superendividado = incapaz de pagar a totalidade das dívidas sem comprometer o mínimo existencial
     const isSuperEndividado = sobraAposTudo < 0 || rendaDisponivel <= 0;
@@ -2333,7 +2375,46 @@
       </div>
       <div class="alerta-inline" style="margin-top:14px;background:${planoStatusBg};border-color:${planoStatusCor};color:${planoViavel ? '#1b5e20' : '#7a2218'}">
         ${planoViavel ? '✅' : '⚠️'} ${planoNota}
-      </div>`;
+      </div>
+
+      <h4 style="font-size:0.9rem;font-weight:700;color:var(--primary);margin:20px 0 10px">⚖️ Cenários de parcela (escolha a tese)</h4>
+      <div class="cenarios-grid">
+        ${cenarios.map((c, i) => `
+          <div class="cenario-box ${i === 0 ? 'destaque' : ''}">
+            <div class="cenario-nome">${c.nome}</div>
+            <div class="cenario-parcela">${fmtCents(c.parcela)}<span>/mês</span></div>
+            <div class="cenario-info">${pct(c.pctRenda)} da renda líquida</div>
+            <div class="cenario-info">Quita em <b>${c.meses === null ? '—' : c.meses + ' meses'}</b>${c.meses && c.meses > 60 ? ' <span style="color:var(--danger)">(acima de 60)</span>' : ''}</div>
+          </div>`).join('')}
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">A parcela legal deve ficar entre 30% e 35% da renda líquida e quitar em até 60 meses. Cenários que passam de 60 meses exigem pedido de remição/abatimento.</p>
+
+      ${distribuicao.length ? `
+      <h4 style="font-size:0.9rem;font-weight:700;color:var(--primary);margin:20px 0 10px">📊 Divisão da parcela sugerida por credor</h4>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Credor</th><th class="td-right">Saldo devedor</th><th class="td-right">% do passivo</th><th class="td-right">Parcela proposta/mês</th>
+          </tr></thead>
+          <tbody>
+            ${distribuicao.map(x => `
+              <tr>
+                <td><strong>${x.credor}</strong><br><span style="font-size:0.78rem;color:var(--text-muted)">${x.tipo}</span></td>
+                <td class="td-right">${fmtCents(x.saldo)}</td>
+                <td class="td-right">${pct(x.pctSaldo)}</td>
+                <td class="td-right"><strong style="color:var(--primary)">${fmtCents(x.fatia)}</strong></td>
+              </tr>`).join('')}
+          </tbody>
+          <tfoot><tr class="subtotal-row">
+            <td><strong>TOTAL</strong></td>
+            <td class="td-right"><strong>${fmtCents(totalSaldo)}</strong></td>
+            <td class="td-right"><strong>100%</strong></td>
+            <td class="td-right"><strong>${fmtCents(parcelaSugerida)}</strong></td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">Divisão proporcional ao saldo de cada credor — pronta para apresentar na audiência de conciliação (art. 104-A CDC).</p>
+      ` : ''}`;
 
     // ---- Contexto Social ----
     renderContextoSocial();
@@ -2513,6 +2594,7 @@
       totalSaldo, parcelasFora, parcelasFolha, comprometimentoMensal,
       comprometimentoPct, isSuperEndividado, dep, despEssenciais,
       PRAZO_MAX, parcelaPor60, cap30, cap35, parcelaSugerida, parcelaSugeridaPct,
+      cenarios, distribuicao,
       mesesPlano, planoViavel, planoNota, contexto: getContexto(),
       situacaoProfissional: document.getElementById('situacaoProfissional').value
     };
@@ -2724,6 +2806,16 @@
       `g) dívidas decorrentes de apostas/jogos de azar ("bets"): ${ctx.bets || '_______________'}.`,
     ].join('\n');
 
+    // Divisão da parcela por credor (para a proposta de plano)
+    const distribuicaoLista = (c.distribuicao || []).map((x, i) =>
+      `   ${i + 1}. ${x.credor} (${x.tipo}): ${fmtCents(x.fatia)}/mês — ${pct(x.pctSaldo)} do passivo;`
+    ).join('\n');
+
+    // Cenários de parcela (para fundamentar a tese escolhida)
+    const cenariosLista = (c.cenarios || []).map(cn =>
+      `   • ${cn.nome}: ${fmtCents(cn.parcela)}/mês (${pct(cn.pctRenda)} da renda líquida), quitação em ${cn.meses === null ? '—' : cn.meses + ' meses'};`
+    ).join('\n');
+
     const advLinha = [cfg.advogado, cfg.oab].filter(Boolean).join(', ');
 
     const texto = `EXCELENTÍSSIMO(A) SENHOR(A) DOUTOR(A) JUIZ(A) DE DIREITO DA ___ VARA CÍVEL DA COMARCA DE _______________
@@ -2777,6 +2869,14 @@ Observado o prazo legal máximo de 60 (sessenta) meses e o limite de comprometim
    Capacidade de pagamento (30% a 35% da líquida): .. ${fmtCents(c.cap30)} a ${fmtCents(c.cap35)}
    PARCELA MENSAL SUGERIDA: ......................... ${fmtCents(c.parcelaSugerida)} (${pct(c.parcelaSugeridaPct)} da renda líquida)
    Prazo estimado de quitação com a parcela sugerida: ${c.mesesPlano === null ? 'inviável sem remição' : c.mesesPlano + ' meses'}
+
+Para subsidiar a fixação do plano, apresentam-se os seguintes cenários, todos compatíveis com a preservação do mínimo existencial:
+
+${cenariosLista}
+
+A parcela mensal proposta de ${fmtCents(c.parcelaSugerida)} será rateada entre os credores na proporção de seus saldos, nos seguintes valores:
+
+${distribuicaoLista}
 
 ${c.planoViavel
   ? 'A parcela proposta quita integralmente o passivo dentro do prazo legal, sem sacrifício do mínimo existencial.'
