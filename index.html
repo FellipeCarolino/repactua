@@ -1,0 +1,2873 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calculadora de Superendividamento | Lei 14.181/2021</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #1a3a5c;
+      --primary-light: #2c5f8a;
+      --accent: #c8960c;
+      --accent-light: #f0b429;
+      --danger: #c0392b;
+      --success: #1e7e34;
+      --warning: #856404;
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --border: #d0d7e2;
+      --text: #1c2b3a;
+      --text-muted: #5a6a7a;
+      --radius: 10px;
+      --shadow: 0 2px 12px rgba(0,0,0,0.08);
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+      color: #fff;
+      padding: 28px 40px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      box-shadow: 0 3px 16px rgba(0,0,0,0.18);
+    }
+
+    .logo-icon {
+      width: 56px;
+      height: 56px;
+      background: rgba(255,255,255,0.12);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      flex-shrink: 0;
+    }
+
+    header h1 { font-size: 1.55rem; font-weight: 700; letter-spacing: -0.3px; }
+    header p { font-size: 0.85rem; opacity: 0.78; margin-top: 3px; }
+
+    .badge-lei {
+      margin-left: auto;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+
+    .info-banner {
+      background: linear-gradient(90deg, #e8f0f8 0%, #f0f4fa 100%);
+      border-left: 4px solid var(--primary-light);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 14px 20px;
+      margin-bottom: 28px;
+      font-size: 0.87rem;
+      color: var(--primary);
+      line-height: 1.6;
+    }
+
+    .info-banner strong { display: block; margin-bottom: 4px; font-size: 0.92rem; }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-header .icon {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .card-header h2 { font-size: 0.97rem; font-weight: 700; }
+    .card-header p { font-size: 0.78rem; color: var(--text-muted); margin-top: 1px; }
+
+    .card-body { padding: 20px; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-group:last-child { margin-bottom: 0; }
+
+    label {
+      display: block;
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    label .tooltip {
+      display: inline-block;
+      width: 16px; height: 16px;
+      background: var(--border);
+      border-radius: 50%;
+      text-align: center;
+      line-height: 16px;
+      font-size: 10px;
+      cursor: help;
+      margin-left: 5px;
+      color: var(--text-muted);
+      font-weight: 700;
+      position: relative;
+    }
+
+    label .tooltip:hover::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 22px;
+      top: -6px;
+      background: var(--text);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      z-index: 10;
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      pointer-events: none;
+      min-width: 220px;
+      white-space: normal;
+      line-height: 1.4;
+    }
+
+    input[type="text"], input[type="number"], select {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      font-size: 0.95rem;
+      background: #fafbfd;
+      color: var(--text);
+      transition: border-color 0.2s;
+      outline: none;
+    }
+
+    input:focus, select:focus { border-color: var(--primary-light); background: #fff; }
+
+    input.money { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .input-currency { position: relative; }
+
+    .input-currency span {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      pointer-events: none;
+    }
+
+    .input-currency input { padding-left: 38px; }
+
+    /* Despesas discriminadas */
+    .despesas-toggle {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: #f0f4fa;
+      border: 1.5px solid var(--border);
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--primary);
+      user-select: none;
+    }
+    .despesas-toggle:hover { background: #e6eef8; }
+    .despesas-total-mini { font-weight: 400; color: var(--text-muted); font-size: 0.82rem; }
+    .despesas-total-mini strong { color: var(--primary); }
+
+    .despesas-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      margin-top: 12px;
+      padding: 14px;
+      background: #fafbfd;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    @media (max-width: 600px) { .despesas-grid { grid-template-columns: 1fr; } }
+
+    .despesa-item { display: flex; flex-direction: column; gap: 3px; }
+    .despesa-item label {
+      font-size: 0.72rem;
+      text-transform: none;
+      letter-spacing: 0;
+      margin: 0;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .despesa-item .input-currency input { padding: 7px 10px 7px 30px; font-size: 0.85rem; }
+    .despesa-item .input-currency span { font-size: 0.78rem; left: 9px; }
+
+    .despesas-grid .despesa-total-row {
+      grid-column: 1 / -1;
+      border-top: 1.5px dashed var(--border);
+      margin-top: 4px;
+      padding-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      font-weight: 700;
+      color: var(--primary);
+      font-size: 0.92rem;
+    }
+
+    /* Cascata de renda */
+    .cascata {
+      background: #f7fafd;
+      border: 1px solid #c9daee;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-top: 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .cascata-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 5px 0;
+      font-size: 0.86rem;
+      gap: 10px;
+    }
+
+    .cascata-row .desc { color: var(--text-muted); }
+    .cascata-row .val { font-weight: 700; white-space: nowrap; }
+    .cascata-row.menos .val { color: var(--danger); }
+    .cascata-row.sub {
+      border-top: 1px dashed #b9cde2;
+      margin-top: 4px; padding-top: 8px;
+    }
+    .cascata-row.sub .desc { font-weight: 700; color: var(--primary); }
+    .cascata-row.sub .val { color: var(--primary); font-size: 0.95rem; }
+    .cascata-row.final .desc, .cascata-row.final .val { font-size: 1rem; }
+    .cascata-row.negativa .val { color: var(--danger) !important; }
+
+    .alerta-inline {
+      margin-top: 8px;
+      background: #fdecea;
+      border: 1px solid #e8a49a;
+      color: #7a2218;
+      border-radius: 7px;
+      padding: 8px 12px;
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+
+    /* Dívidas dinâmicas */
+    .debt-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+
+    .debt-item {
+      background: #f8f9fc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      position: relative;
+    }
+
+    .debt-item-row { display: grid; grid-template-columns: 2fr 1.4fr 1fr 1fr auto; gap: 8px; align-items: end; }
+    @media (max-width: 600px) { .debt-item-row { grid-template-columns: 1fr 1fr; } }
+
+    .debt-parcelas-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+    }
+    .debt-parcelas-row label { font-size: 0.72rem; text-transform: none; letter-spacing: 0; }
+    .debt-parcelas-row input { padding: 7px 10px; font-size: 0.85rem; }
+    @media (max-width: 600px) { .debt-parcelas-row { grid-template-columns: 1fr 1fr; } }
+
+    .debt-item .btn-remove {
+      background: #fde8e8;
+      border: none;
+      border-radius: 6px;
+      width: 32px; height: 32px;
+      cursor: pointer;
+      color: var(--danger);
+      font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+    }
+
+    .debt-item .btn-remove:hover { background: #fcc; }
+
+    .debt-folha-flag {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .debt-folha-flag input { width: auto; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1.5px solid var(--primary-light);
+      color: var(--primary-light);
+    }
+
+    .btn-outline:hover { background: #e8f0f8; }
+
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-light); }
+
+    .btn-accent { background: var(--accent); color: #fff; }
+    .btn-accent:hover { background: var(--accent-light); }
+
+    .btn-lg { padding: 14px 32px; font-size: 1rem; }
+
+    .actions {
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      margin: 28px 0;
+      flex-wrap: wrap;
+    }
+
+    /* Resultado */
+    #resultado { display: none; }
+
+    .resultado-hero {
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .resultado-hero.superendividado {
+      background: linear-gradient(135deg, #fdf0ef 0%, #fdecea 100%);
+      border: 2px solid #e8a49a;
+    }
+
+    .resultado-hero.limite {
+      background: linear-gradient(135deg, #fffbea 0%, #fff8dc 100%);
+      border: 2px solid #e6c45a;
+    }
+
+    .resultado-hero.saudavel {
+      background: linear-gradient(135deg, #edfbf0 0%, #e5f7ea 100%);
+      border: 2px solid #7ec891;
+    }
+
+    .resultado-icon { font-size: 52px; flex-shrink: 0; }
+
+    .resultado-titulo { font-size: 1.5rem; font-weight: 800; margin-bottom: 6px; }
+    .resultado-subtitulo { font-size: 0.92rem; line-height: 1.6; max-width: 560px; }
+
+    .resultado-situacao-badge {
+      margin-left: auto;
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .badge-danger { background: var(--danger); color: #fff; }
+    .badge-warning { background: #f0c040; color: #5a4000; }
+    .badge-success { background: var(--success); color: #fff; }
+
+    /* Demonstrativo de cálculo */
+    .demonstrativo {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .demonstrativo h3 { font-size: 0.97rem; margin-bottom: 16px; font-weight: 700; }
+
+    .demo-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+    .demo-table td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; }
+    .demo-table td:last-child { text-align: right; font-weight: 700; white-space: nowrap; }
+    .demo-table tr.menos td:last-child { color: var(--danger); }
+    .demo-table tr.subtotal td {
+      border-top: 2px solid var(--border);
+      background: #f7fafd;
+      font-weight: 700;
+      color: var(--primary);
+    }
+    .demo-table tr.final td {
+      background: #eef6ee;
+      font-weight: 800;
+      font-size: 0.98rem;
+    }
+    .demo-table tr.final.negativo td { background: #fdecea; color: var(--danger); }
+    .demo-table .ref { font-size: 0.74rem; color: var(--text-muted); font-weight: 400; display: block; }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    @media (max-width: 700px) { .metrics-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 480px) { .metrics-grid { grid-template-columns: 1fr; } }
+
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 16px;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+
+    .metric-card .metric-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .metric-card .metric-value {
+      font-size: 1.35rem;
+      font-weight: 800;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-card .metric-sub {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 5px;
+    }
+
+    .metric-card.highlight-danger .metric-value { color: var(--danger); }
+    .metric-card.highlight-warning .metric-value { color: var(--warning); }
+    .metric-card.highlight-success .metric-value { color: var(--success); }
+    .metric-card.highlight-primary .metric-value { color: var(--primary); }
+
+    .comprometimento-section, .dividas-section, .legal-section, .rec-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .comprometimento-section h3, .dividas-section h3, .legal-section h3, .rec-section h3 {
+      font-size: 0.97rem; margin-bottom: 16px; font-weight: 700;
+    }
+
+    .plano-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 700px) { .plano-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 460px) { .plano-grid { grid-template-columns: 1fr; } }
+    .plano-box {
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fafbfd;
+    }
+    .plano-lbl { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); font-weight: 600; }
+    .plano-val { font-size: 1.15rem; font-weight: 800; color: var(--primary); margin-top: 6px; }
+    .plano-sub { font-size: 0.74rem; color: var(--text-muted); margin-top: 3px; }
+
+    .ctx-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 600px) { .ctx-grid { grid-template-columns: 1fr; } }
+    .ctx-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.86rem;
+      background: #fafbfd;
+    }
+    .ctx-item .ctx-lbl { color: var(--text-muted); }
+    .ctx-item .ctx-v { font-weight: 700; text-align: right; }
+    .ctx-item.alerta { background: #fdecea; border-color: #e8a49a; }
+    .ctx-item.alerta .ctx-v { color: var(--danger); }
+
+    .bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .bar-label { font-size: 0.8rem; color: var(--text-muted); width: 150px; flex-shrink: 0; }
+    .bar-track { flex: 1; height: 18px; background: #eef0f5; border-radius: 9px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 9px; transition: width 0.6s ease; min-width: 2px; }
+    .bar-val { font-size: 0.82rem; font-weight: 700; width: 52px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+
+    .bar-fill.azul    { background: linear-gradient(90deg, #2c5f8a, #4a82b0); }
+    .bar-fill.verde   { background: linear-gradient(90deg, #28a745, #34d058); }
+    .bar-fill.amarelo { background: linear-gradient(90deg, #ffc107, #ffda6a); }
+    .bar-fill.vermelho{ background: linear-gradient(90deg, #dc3545, #ff6b7a); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
+    th {
+      background: #f0f3f8;
+      padding: 10px 12px;
+      text-align: left;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 700;
+    }
+    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+    tr:last-child td { border-bottom: none; }
+
+    .td-right { text-align: right; font-variant-numeric: tabular-nums; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .tag-protegida { background: #e8f5e9; color: #1b5e20; }
+    .tag-comprometida { background: #fce4ec; color: #880e4f; }
+    .tag-normal { background: #e3f2fd; color: #0d47a1; }
+    .tag-folha { background: #fff3e0; color: #7a4a00; }
+
+    .legal-item {
+      display: flex;
+      gap: 14px;
+      padding: 14px 0;
+      border-bottom: 1px solid #f0f0f0;
+      align-items: flex-start;
+    }
+
+    .legal-item:last-child { border-bottom: none; }
+
+    .legal-icon {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .legal-item h4 { font-size: 0.9rem; font-weight: 700; margin-bottom: 4px; }
+    .legal-item p { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; }
+    .legal-item .artigo { font-size: 0.74rem; font-weight: 700; color: var(--primary-light); margin-top: 4px; }
+
+    .rec-item {
+      display: flex;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid #f5f5f5;
+      align-items: flex-start;
+      font-size: 0.87rem;
+      line-height: 1.5;
+    }
+
+    .rec-item:last-child { border-bottom: none; }
+    .rec-num {
+      width: 26px; height: 26px;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    /* Modais */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15,30,50,0.55);
+      z-index: 100;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 16px;
+      overflow-y: auto;
+    }
+
+    .modal-overlay.aberto { display: flex; }
+
+    .modal {
+      background: #fff;
+      border-radius: var(--radius);
+      max-width: 560px;
+      width: 100%;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.3);
+      overflow: hidden;
+    }
+
+    .modal-header {
+      padding: 16px 22px;
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-header h2 { font-size: 1.05rem; }
+
+    .modal-header .fechar {
+      background: rgba(255,255,255,0.15);
+      border: none;
+      color: #fff;
+      width: 30px; height: 30px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+    }
+
+    .modal-body { padding: 22px; }
+
+    .header-acoes {
+      display: flex;
+      gap: 8px;
+      margin-left: 12px;
+      flex-shrink: 0;
+    }
+
+    .btn-header {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.3);
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+
+    .btn-header:hover { background: rgba(255,255,255,0.25); }
+
+    .caso-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+
+    .caso-item .caso-info { flex: 1; }
+    .caso-item .caso-nome { font-weight: 700; font-size: 0.92rem; }
+    .caso-item .caso-data { font-size: 0.76rem; color: var(--text-muted); margin-top: 2px; }
+    .caso-item .btn { padding: 7px 12px; font-size: 0.8rem; }
+
+    .logo-preview {
+      max-height: 64px;
+      max-width: 220px;
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px;
+      display: none;
+    }
+
+    /* Cabeçalho timbrado (impressão) */
+    #printHeader {
+      display: none;
+      border-bottom: 3px solid var(--primary);
+      padding-bottom: 14px;
+      margin-bottom: 24px;
+    }
+
+    #printHeader .ph-flex { display: flex; align-items: center; gap: 18px; }
+    #printHeader img { max-height: 60px; max-width: 200px; }
+    #printHeader .ph-nome { font-size: 1.15rem; font-weight: 800; color: var(--primary); }
+    #printHeader .ph-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+    #printHeader .ph-data { margin-left: auto; text-align: right; font-size: 0.78rem; color: var(--text-muted); }
+
+    /* Minuta de petição */
+    .peticao-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .peticao-section h3 { font-size: 0.97rem; margin-bottom: 12px; font-weight: 700; }
+
+    #textoPeticao {
+      width: 100%;
+      min-height: 380px;
+      font-family: 'Times New Roman', Georgia, serif;
+      font-size: 0.92rem;
+      line-height: 1.7;
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fffef9;
+      white-space: pre-wrap;
+      resize: vertical;
+    }
+
+    @media print {
+      #printHeader { display: block !important; }
+      .peticao-section { display: none; }
+      .modal-overlay { display: none !important; }
+      header { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .actions, .form-section { display: none !important; }
+      #resultado { display: block !important; }
+      body { background: white; }
+      .card, .resultado-hero, .metric-card, .comprometimento-section,
+      .dividas-section, .legal-section, .rec-section, .demonstrativo { box-shadow: none !important; }
+    }
+
+    .subtotal-row td { font-weight: 700; background: #f8f9fc; }
+
+    .nota-rodape {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 32px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo-icon">⚖️</div>
+  <div>
+    <h1>Calculadora de Superendividamento</h1>
+    <p>Análise jurídico-financeira com base na Lei 14.181/2021 e no Código de Defesa do Consumidor</p>
+  </div>
+  <div class="badge-lei">Lei nº 14.181/2021</div>
+  <div class="header-acoes">
+    <button class="btn-header" onclick="abrirModal('modalCasos'); listarCasos()">📁 Casos Salvos</button>
+    <button class="btn-header" onclick="abrirModal('modalEscritorio')">⚙️ Escritório</button>
+  </div>
+</header>
+
+<!-- Modal: Configuração do Escritório -->
+<div class="modal-overlay" id="modalEscritorio">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>⚙️ Dados do Escritório (timbre do relatório)</h2>
+      <button class="fechar" onclick="fecharModal('modalEscritorio')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Nome do Escritório</label>
+        <input type="text" id="escNome" placeholder="Ex.: Carolino Advocacia" />
+      </div>
+      <div class="form-group">
+        <label>Advogado(a) Responsável</label>
+        <input type="text" id="escAdvogado" placeholder="Ex.: Felipe Carolino" />
+      </div>
+      <div class="form-group">
+        <label>OAB</label>
+        <input type="text" id="escOAB" placeholder="Ex.: OAB/SP 123.456" />
+      </div>
+      <div class="form-group">
+        <label>Telefone / E-mail (opcional)</label>
+        <input type="text" id="escContato" placeholder="Ex.: (11) 99999-9999 · contato@escritorio.adv.br" />
+      </div>
+      <div class="form-group">
+        <label>Logo do Escritório (opcional)</label>
+        <input type="file" id="escLogo" accept="image/*" onchange="carregarLogo(this)" />
+        <img id="escLogoPreview" class="logo-preview" alt="Logo" />
+      </div>
+      <div style="display:flex;gap:10px;margin-top:18px">
+        <button class="btn btn-primary" onclick="salvarEscritorio()">💾 Salvar</button>
+        <button class="btn btn-outline" onclick="fecharModal('modalEscritorio')">Cancelar</button>
+      </div>
+      <p style="font-size:0.75rem;color:var(--text-muted);margin-top:12px">Os dados ficam salvos apenas neste navegador e aparecem no cabeçalho do relatório impresso/PDF e na minuta de petição.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Casos Salvos -->
+<div class="modal-overlay" id="modalCasos">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>📁 Casos Salvos</h2>
+      <button class="fechar" onclick="fecharModal('modalCasos')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:10px;margin-bottom:18px">
+        <input type="text" id="nomeCaso" placeholder="Nome do caso (ex.: João da Silva — repactuação)" style="flex:1" />
+        <button class="btn btn-primary" onclick="salvarCaso()">💾 Salvar atual</button>
+      </div>
+      <div id="listaCasos"></div>
+      <p style="font-size:0.75rem;color:var(--text-muted);margin-top:12px">Os casos ficam salvos apenas neste navegador (localStorage). Ao carregar um caso, os dados atuais do formulário são substituídos.</p>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="info-banner">
+    <strong>Como funciona esta calculadora</strong>
+    Informe a renda bruta e os descontos reais do holerite. A calculadora monta a cadeia correta: <b>renda bruta → descontos obrigatórios (INSS, IRRF, pensão) → renda líquida → descontos em folha (consignados) → renda efetivamente recebida</b>. Sobre essa base aplica o mínimo existencial e enquadra a situação na Lei nº 14.181/2021 (arts. 54-A e 104-A do CDC).
+  </div>
+
+  <div class="form-section">
+    <div class="grid-2">
+      <!-- ==================== RENDA ==================== -->
+      <div class="card">
+        <div class="card-header">
+          <div class="icon" style="background:#e8f0f8">💰</div>
+          <div>
+            <h2>Renda — Composição do Holerite</h2>
+            <p>Valores conforme contracheque / comprovante de rendimentos</p>
+          </div>
+          <button class="btn btn-accent" style="margin-left:auto" id="btnHolerite" onclick="document.getElementById('fileHolerite').click()">📎 Ler holerite com IA</button>
+          <input type="file" id="fileHolerite" accept=".pdf,image/*" style="display:none" onchange="lerHoleriteIA(this)" />
+        </div>
+        <div class="card-body">
+
+          <div id="iaHoleriteStatus"></div>
+
+          <div class="form-group">
+            <label>Nome do Devedor (opcional)</label>
+            <input type="text" id="nome" placeholder="Ex.: João da Silva" />
+          </div>
+
+          <div class="form-group">
+            <label>Renda Bruta Mensal
+              <span class="tooltip" data-tip="Soma de todos os rendimentos brutos: salário, aposentadoria, aluguéis, pró-labore, antes de qualquer desconto.">?</span>
+            </label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" id="rendaBruta" inputmode="numeric" placeholder="0,00" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>(−) INSS / Previdência
+              <span class="tooltip" data-tip="Contribuição previdenciária descontada em folha (INSS ou regime próprio).">?</span>
+            </label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" id="descINSS" inputmode="numeric" placeholder="0,00" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Imposto de Renda — Situação do Devedor
+              <span class="tooltip" data-tip="Quem é portador de moléstia grave (câncer, cardiopatia grave, Parkinson, esclerose múltipla, etc.) e recebe aposentadoria, reforma ou pensão é ISENTO de IR — art. 6º, XIV, Lei 7.713/88.">?</span>
+            </label>
+            <select id="situacaoIR" onchange="alternarIR()">
+              <option value="auto">Pagante — calcular IRRF automaticamente (tabela 2025)</option>
+              <option value="manual">Pagante — informar valor do holerite</option>
+              <option value="isento_molestia">ISENTO — moléstia grave (art. 6º, XIV, Lei 7.713/88)</option>
+              <option value="isento_faixa">ISENTO — renda abaixo da faixa de tributação</option>
+              <option value="isento_outro">ISENTO — outro motivo</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="grupoIRManual" style="display:none">
+            <label>(−) IRRF — valor do holerite</label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" id="descIRRF" inputmode="numeric" placeholder="0,00" />
+            </div>
+          </div>
+
+          <div class="form-group" id="grupoIRDependentes">
+            <label>Dependentes para fins de IR
+              <span class="tooltip" data-tip="Dependentes declarados no IR (filhos, cônjuge sem renda, etc.). Dedução de R$ 189,59 por dependente na base de cálculo.">?</span>
+            </label>
+            <select id="dependentesIR">
+              <option value="0">Nenhum</option>
+              <option value="1">1 dependente</option>
+              <option value="2">2 dependentes</option>
+              <option value="3">3 dependentes</option>
+              <option value="4">4 dependentes</option>
+              <option value="5">5 ou mais</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="grupoMolestia" style="display:none">
+            <label>Moléstia Grave — Enquadramento
+              <span class="tooltip" data-tip="Rol do art. 6º, XIV, da Lei 7.713/88. A isenção alcança aposentadoria, reforma e pensão, mesmo com a doença controlada (Súmula 627 STJ).">?</span>
+            </label>
+            <select id="molestiaGrave">
+              <option value="neoplasia">Neoplasia maligna (câncer)</option>
+              <option value="cardiopatia">Cardiopatia grave</option>
+              <option value="aids">AIDS (Síndrome da Imunodeficiência Adquirida)</option>
+              <option value="parkinson">Doença de Parkinson</option>
+              <option value="esclerose">Esclerose múltipla</option>
+              <option value="renal">Nefropatia grave</option>
+              <option value="hepatopatia">Hepatopatia grave</option>
+              <option value="tuberculose">Tuberculose ativa</option>
+              <option value="hanseniase">Hanseníase</option>
+              <option value="alienacao">Alienação mental</option>
+              <option value="cegueira">Cegueira (inclusive monocular)</option>
+              <option value="paralisia">Paralisia irreversível e incapacitante</option>
+              <option value="espondiloartrose">Espondiloartrose anquilosante</option>
+              <option value="osteite">Osteíte deformante (doença de Paget)</option>
+              <option value="contaminacao">Contaminação por radiação</option>
+              <option value="fibrose">Fibrose cística (mucoviscidose)</option>
+            </select>
+            <div class="alerta-inline" style="background:#e8f5e9;border-color:#7ec891;color:#1b5e20;margin-top:8px">
+              ✅ <b>Isenção de IR reconhecida por lei</b> para portadores de moléstia grave que recebam aposentadoria, reforma ou pensão (art. 6º, XIV, Lei 7.713/88). Vale mesmo com a doença controlada ou em remissão (Súmula 627 do STJ). Se houve retenção indevida, cabe <b>restituição dos últimos 5 anos</b>.
+            </div>
+          </div>
+
+          <div id="grupoIRAuto" class="cascata" style="margin-bottom:16px;display:none">
+            <div class="cascata-row">
+              <span class="desc">IRRF calculado (tabela progressiva mensal 2025)</span>
+              <span class="val" id="irrfCalculado">R$ 0,00</span>
+            </div>
+            <div class="cascata-row" style="font-size:0.76rem">
+              <span class="desc" id="irrfDetalhe">—</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>(−) Pensão Alimentícia em Folha
+              <span class="tooltip" data-tip="Pensão alimentícia descontada diretamente em folha por determinação judicial.">?</span>
+            </label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" id="descPensao" inputmode="numeric" placeholder="0,00" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>(−) Outros Descontos Obrigatórios
+              <span class="tooltip" data-tip="Contribuição sindical, coparticipação de plano de saúde obrigatório, etc.">?</span>
+            </label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" id="descOutros" inputmode="numeric" placeholder="0,00" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>(−) Empréstimos Consignados em Folha
+              <span class="tooltip" data-tip="Total das parcelas de crédito consignado descontadas diretamente em folha. Limite legal: 35% da remuneração (+5% cartão consignado) — Lei 14.431/2022.">?</span>
+            </label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" id="descConsignado" inputmode="numeric" placeholder="0,00" />
+            </div>
+          </div>
+
+          <!-- Cascata calculada ao vivo -->
+          <div class="cascata" id="cascataRenda">
+            <div class="cascata-row">
+              <span class="desc">Renda Bruta</span>
+              <span class="val" id="cRendaBruta">R$ 0,00</span>
+            </div>
+            <div class="cascata-row menos">
+              <span class="desc">(−) Descontos obrigatórios (INSS + IRRF + pensão + outros)</span>
+              <span class="val" id="cDescObrig">− R$ 0,00</span>
+            </div>
+            <div class="cascata-row sub">
+              <span class="desc">= Renda Líquida</span>
+              <span class="val" id="cRendaLiquida">R$ 0,00</span>
+            </div>
+            <div class="cascata-row menos">
+              <span class="desc">(−) Consignados em folha</span>
+              <span class="val" id="cConsignado">− R$ 0,00</span>
+            </div>
+            <div class="cascata-row sub final" id="rowEfetiva">
+              <span class="desc">= Renda Efetivamente Recebida</span>
+              <span class="val" id="cRendaEfetiva">R$ 0,00</span>
+            </div>
+            <div id="alertaConsignado"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ==================== PERFIL ==================== -->
+      <div class="card">
+        <div class="card-header">
+          <div class="icon" style="background:#fef9e7">📋</div>
+          <div>
+            <h2>Perfil e Despesas do Devedor</h2>
+            <p>Características jurídicas e custo de vida</p>
+          </div>
+        </div>
+        <div class="card-body">
+
+          <div class="form-group">
+            <label>Ano de Referência
+              <span class="tooltip" data-tip="Define o salário mínimo e a tabela de IR usados nos cálculos. O salário mínimo pode ser ajustado manualmente abaixo caso haja atualização legal.">?</span>
+            </label>
+            <select id="anoReferencia" onchange="aplicarAno()">
+              <option value="2026" selected>2026</option>
+              <option value="2025">2025</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Salário Mínimo Vigente (editável)
+              <span class="tooltip" data-tip="Preenchido automaticamente pelo ano de referência. Edite se o valor oficial for atualizado — todos os cálculos (mínimo existencial) usarão o valor informado.">?</span>
+            </label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" id="salarioMinimo" inputmode="numeric" placeholder="0,00" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Composição Familiar
+              <span class="tooltip" data-tip="Número de pessoas que vivem da renda do devedor (inclui o próprio devedor). Usado para estimar o mínimo existencial.">?</span>
+            </label>
+            <select id="dependentes" onchange="atualizarCascata()">
+              <option value="1">1 pessoa (apenas o devedor)</option>
+              <option value="2">2 pessoas</option>
+              <option value="3">3 pessoas</option>
+              <option value="4">4 pessoas</option>
+              <option value="5">5 pessoas ou mais</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Despesas Essenciais de Sobrevivência / mês
+              <span class="tooltip" data-tip="Discrimine cada despesa mensal de manutenção do devedor e da família. A soma define o mínimo existencial pelo critério das despesas reais. NÃO incluir aqui parcelas de dívidas em renegociação.">?</span>
+            </label>
+            <div class="despesas-toggle" onclick="toggleDespesas()" id="despesasToggle">
+              <span>🧾 Detalhar despesas essenciais</span>
+              <span class="despesas-total-mini">Total: <strong id="despesasTotalMini">R$ 0,00</strong> <span id="despesasSeta">▸</span></span>
+            </div>
+            <div class="despesas-grid" id="despesasGrid" style="display:none"></div>
+            <input type="hidden" id="despesasEssenciais" value="" />
+          </div>
+
+          <div class="form-group">
+            <label>Critério do Mínimo Existencial
+              <span class="tooltip" data-tip="O Decreto 11.150/2022 (alterado pelo Dec. 11.567/2023) fixa R$ 600,00, mas a doutrina e parte da jurisprudência usam 1 salário mínimo ou as despesas reais de sobrevivência. Escolha o critério da tese do caso.">?</span>
+            </label>
+            <select id="criterioMinimo" onchange="atualizarCascata()">
+              <option value="decreto">Decreto 11.150/2022 — R$ 600,00 fixo</option>
+              <option value="sm" selected>1 Salário Mínimo (R$ 1.518,00) — tese doutrinária</option>
+              <option value="sm_familia">1 SM por pessoa da família (jurisprudência protetiva)</option>
+              <option value="despesas">Despesas essenciais reais comprovadas</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Situação Profissional</label>
+            <select id="situacaoProfissional">
+              <option value="clt">Empregado CLT</option>
+              <option value="servidor">Servidor Público</option>
+              <option value="aposentado">Aposentado / Pensionista</option>
+              <option value="autonomo">Autônomo / MEI</option>
+              <option value="desempregado">Desempregado</option>
+              <option value="empresario">Empresário / Sócio</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Categoria do Devedor</label>
+            <select id="categoriaDevedor">
+              <option value="consumidor">Consumidor (Pessoa Física)</option>
+              <option value="mei">MEI / Pequeno Empresário</option>
+              <option value="empresario">Empresário (Pessoa Jurídica)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Possui imóvel residencial próprio?</label>
+            <select id="imovelProprio">
+              <option value="nao">Não</option>
+              <option value="sim_bem_familia">Sim — Bem de Família (único)</option>
+              <option value="sim_outros">Sim — outros imóveis</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Patrimônio Total (bens)
+              <span class="tooltip" data-tip="Imóveis, veículos, investimentos, poupança. Usado no índice dívida/patrimônio.">?</span>
+            </label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" id="patrimonio" inputmode="numeric" placeholder="0,00" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Há processos de execução em curso?</label>
+            <select id="execucoes">
+              <option value="nao">Não</option>
+              <option value="sim">Sim</option>
+            </select>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== CONTEXTO SOCIAL (Res. CNJ 492/2023) ==================== -->
+    <div class="card" style="margin-bottom:24px">
+      <div class="card-header">
+        <div class="icon" style="background:#f3e5f5">🧑‍⚖️</div>
+        <div>
+          <h2>Contexto Social — Julgamento com Perspectiva de Gênero</h2>
+          <p>Resolução CNJ nº 492/2023. Subsidia a análise do contexto social da parte superendividada.</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="grid-2" style="margin-bottom:0">
+          <div class="form-group">
+            <label>Gênero</label>
+            <select id="ctxGenero">
+              <option value="">Não informar</option>
+              <option value="Feminino">Feminino</option>
+              <option value="Masculino">Masculino</option>
+              <option value="Não binário">Não binário</option>
+              <option value="Outro">Outro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Idade</label>
+            <input type="text" id="ctxIdade" inputmode="numeric" placeholder="Ex.: 42" />
+          </div>
+          <div class="form-group">
+            <label>Nível de Escolaridade</label>
+            <select id="ctxEscolaridade">
+              <option value="">Não informar</option>
+              <option value="Ensino fundamental incompleto">Ensino fundamental incompleto</option>
+              <option value="Ensino fundamental completo">Ensino fundamental completo</option>
+              <option value="Ensino médio incompleto">Ensino médio incompleto</option>
+              <option value="Ensino médio completo">Ensino médio completo</option>
+              <option value="Ensino superior incompleto">Ensino superior incompleto</option>
+              <option value="Ensino superior completo">Ensino superior completo</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Possui dependentes? Quantos?</label>
+            <input type="text" id="ctxDependentes" inputmode="numeric" placeholder="Ex.: 2 (ou 0)" />
+          </div>
+          <div class="form-group">
+            <label>Possui enfermidade crônica com gastos comprovados?</label>
+            <select id="ctxEnfermidade">
+              <option value="">Não informar</option>
+              <option value="Não">Não</option>
+              <option value="Sim">Sim</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Registro de violência doméstica e/ou medida protetiva?
+              <span class="tooltip" data-tip="Informação sensível protegida pela Res. CNJ 492/2023 e pela Lei Maria da Penha. Pode justificar tratamento prioritário e tutela específica.">?</span>
+            </label>
+            <select id="ctxViolencia">
+              <option value="">Não informar</option>
+              <option value="Não">Não</option>
+              <option value="Sim">Sim</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Dentre as causas das dívidas há "bets" (apostas / jogos de azar)?
+              <span class="tooltip" data-tip="A presença de apostas (bets) entre as causas do endividamento é relevante para a aferição da boa-fé e para a abordagem do vício de jogo (Lei 14.790/2023).">?</span>
+            </label>
+            <select id="ctxBets">
+              <option value="">Não informar</option>
+              <option value="Não">Não</option>
+              <option value="Sim">Sim</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== DÍVIDAS ==================== -->
+    <div class="card" style="margin-bottom:24px">
+      <div class="card-header">
+        <div class="icon" style="background:#fde8e8">📑</div>
+        <div>
+          <h2>Dívidas e Obrigações</h2>
+          <p>Dívidas NÃO descontadas em folha (os consignados já entraram acima). Marque "em folha" se a parcela já está no holerite, para não contar duas vezes.</p>
+        </div>
+        <button class="btn btn-outline" style="margin-left:auto" onclick="adicionarDivida()">+ Adicionar Dívida</button>
+      </div>
+      <div class="card-body">
+        <div class="debt-list" id="debtList"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-outline" onclick="adicionarDivida()">+ Adicionar Dívida</button>
+          <button class="btn btn-outline" onclick="adicionarDividasExemplo()">📥 Carregar Exemplo</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary btn-lg" onclick="calcular()">⚖️ Calcular Superendividamento</button>
+      <button class="btn btn-outline btn-lg" onclick="limpar()">🗑️ Limpar</button>
+    </div>
+  </div>
+
+  <!-- ==================== RESULTADO ==================== -->
+  <div id="resultado">
+
+    <!-- Cabeçalho timbrado — aparece apenas na impressão/PDF -->
+    <div id="printHeader">
+      <div class="ph-flex">
+        <img id="phLogo" alt="" style="display:none" />
+        <div>
+          <div class="ph-nome" id="phNome"></div>
+          <div class="ph-sub" id="phSub"></div>
+        </div>
+        <div class="ph-data">
+          Relatório de Análise de Superendividamento<br>
+          <span id="phData"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="resultado-hero" id="heroCard">
+      <div class="resultado-icon" id="heroIcon"></div>
+      <div>
+        <div class="resultado-titulo" id="heroTitulo"></div>
+        <div class="resultado-subtitulo" id="heroSubtitulo"></div>
+      </div>
+      <div class="resultado-situacao-badge" id="heroBadge"></div>
+    </div>
+
+    <!-- Demonstrativo de cálculo -->
+    <div class="demonstrativo">
+      <h3>🧮 Demonstrativo de Cálculo</h3>
+      <table class="demo-table" id="demoTable"></table>
+    </div>
+
+    <!-- Métricas -->
+    <div class="metrics-grid">
+      <div class="metric-card highlight-primary">
+        <div class="metric-label">Renda Líquida</div>
+        <div class="metric-value" id="mRendaLiquida">—</div>
+        <div class="metric-sub">Bruta − descontos obrigatórios</div>
+      </div>
+      <div class="metric-card highlight-primary">
+        <div class="metric-label">Renda Efetivamente Recebida</div>
+        <div class="metric-value" id="mRendaEfetiva">—</div>
+        <div class="metric-sub">Líquida − consignados em folha</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Mínimo Existencial</div>
+        <div class="metric-value" id="mMinExistencial">—</div>
+        <div class="metric-sub" id="mMinExistencialSub">Protegido por lei</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Renda Disponível p/ Dívidas</div>
+        <div class="metric-value" id="mRendaDisponivel">—</div>
+        <div class="metric-sub">Efetiva − mín. existencial − despesas</div>
+      </div>
+      <div class="metric-card" id="mCardComprometimento">
+        <div class="metric-label">Comprometimento Total</div>
+        <div class="metric-value" id="mComprometimento">—</div>
+        <div class="metric-sub">(consignados + parcelas) / renda líquida</div>
+      </div>
+      <div class="metric-card" id="mCardConsignado">
+        <div class="metric-label">Consignado / Renda</div>
+        <div class="metric-value" id="mConsignado">—</div>
+        <div class="metric-sub">Limite legal: 35% + 5% (Lei 14.431/2022)</div>
+      </div>
+      <div class="metric-card highlight-primary">
+        <div class="metric-label">Total de Dívidas (saldo)</div>
+        <div class="metric-value" id="mTotalDividas">—</div>
+        <div class="metric-sub">Saldo devedor consolidado</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Índice Dívida / Patrimônio</div>
+        <div class="metric-value" id="mIndiceDivida">—</div>
+        <div class="metric-sub">Saldo devedor / patrimônio total</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Meses para Quitar</div>
+        <div class="metric-value" id="mMesesQuitar">—</div>
+        <div class="metric-sub">Com a renda disponível atual</div>
+      </div>
+    </div>
+
+    <!-- Barra de comprometimento -->
+    <div class="comprometimento-section">
+      <h3>📊 Distribuição da Renda Líquida</h3>
+      <div class="bar-row">
+        <div class="bar-label">Consignados em folha</div>
+        <div class="bar-track"><div class="bar-fill azul" id="barConsig" style="width:0%"></div></div>
+        <div class="bar-val" id="barConsigVal">0%</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Mínimo Existencial</div>
+        <div class="bar-track"><div class="bar-fill verde" id="barMinimo" style="width:0%"></div></div>
+        <div class="bar-val" id="barMinimoVal">0%</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Despesas Essenciais</div>
+        <div class="bar-track"><div class="bar-fill amarelo" id="barDespesas" style="width:0%"></div></div>
+        <div class="bar-val" id="barDespesasVal">0%</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Parcelas de Dívidas</div>
+        <div class="bar-track"><div class="bar-fill vermelho" id="barDividas" style="width:0%"></div></div>
+        <div class="bar-val" id="barDividasVal">0%</div>
+      </div>
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-top:10px;">
+        ⚠️ A soma acima de 100% indica que a renda líquida é insuficiente para cobrir todos os compromissos — caracterização visual do superendividamento.
+      </div>
+    </div>
+
+    <!-- Tabela de dívidas -->
+    <div class="dividas-section">
+      <h3>📋 Quadro Demonstrativo das Dívidas</h3>
+      <div style="overflow-x:auto">
+        <table id="tabelaDividas">
+          <thead>
+            <tr>
+              <th>Credor / Tipo</th>
+              <th class="td-right">Saldo Devedor</th>
+              <th class="td-right">Parcela/mês</th>
+              <th class="td-right">Contrat.</th>
+              <th class="td-right">Pagas</th>
+              <th class="td-right">A pagar</th>
+              <th class="td-right">% Renda</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="tabelaDividasBody"></tbody>
+          <tfoot id="tabelaDividasFoot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Plano de Pagamento Sugerido -->
+    <div class="dividas-section" id="planoSection">
+      <h3>📅 Plano de Pagamento Sugerido (art. 104-A e 104-B, §4º, CDC)</h3>
+      <div id="planoConteudo"></div>
+    </div>
+
+    <!-- Contexto Social -->
+    <div class="dividas-section" id="ctxSection" style="display:none">
+      <h3>🧑‍⚖️ Contexto Social — Perspectiva de Gênero (Res. CNJ 492/2023)</h3>
+      <div id="ctxConteudo"></div>
+    </div>
+
+    <!-- Enquadramento Legal -->
+    <div class="legal-section">
+      <h3>📖 Enquadramento Jurídico</h3>
+      <div id="legalItems"></div>
+    </div>
+
+    <!-- Recomendações -->
+    <div class="rec-section">
+      <h3>💡 Recomendações Jurídicas</h3>
+      <div id="recomendacoes"></div>
+    </div>
+
+    <!-- Minuta de Petição -->
+    <div class="peticao-section" id="peticaoSection" style="display:none">
+      <h3>📄 Minuta de Petição Inicial — Repactuação de Dívidas (art. 104-A CDC)</h3>
+      <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:12px">Minuta gerada automaticamente com os dados e cálculos do caso. Revise, ajuste o juízo competente e os fatos antes de protocolar.</p>
+      <textarea id="textoPeticao" spellcheck="false"></textarea>
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="copiarPeticao()">📋 Copiar texto</button>
+        <button class="btn btn-outline" onclick="baixarPeticao()">⬇️ Baixar (.txt)</button>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-accent btn-lg" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+      <button class="btn btn-primary btn-lg" onclick="gerarPeticao()">📄 Gerar Minuta de Petição</button>
+      <button class="btn btn-outline btn-lg" onclick="document.getElementById('nomeCaso').value=''; abrirModal('modalCasos'); listarCasos()">💾 Salvar Caso</button>
+      <button class="btn btn-outline btn-lg" onclick="limpar()">🔄 Nova Consulta</button>
+    </div>
+
+    <p class="nota-rodape">
+      Esta calculadora é uma ferramenta de apoio jurídico-financeiro. Os resultados não substituem análise jurídica profissional individualizada.<br>
+      Referências: Lei nº 14.181/2021 · CDC arts. 54-A a 54-G e 104-A a 104-C · Decreto 11.150/2022 (Dec. 11.567/2023) · Lei 14.431/2022 (margem consignável 35%+5%) · Lei 15.270/2025 (isenção IR até R$ 5.000) · Lei 8.009/1990 · Parâmetros conforme o ano de referência selecionado
+    </p>
+  </div>
+</main>
+
+<script>
+  'use strict';
+
+  // ============================================================
+  // PARÂMETROS LEGAIS POR ANO DE REFERÊNCIA
+  // Para um novo ano: adicionar entrada aqui e <option> no select
+  // #anoReferencia. Valores em centavos.
+  // ============================================================
+  const PARAMETROS_ANUAIS = {
+    '2025': {
+      smCents: 151800,            // R$ 1.518,00
+      minimoDecretoCents: 60000,  // Decreto 11.150/2022 (Dec. 11.567/2023)
+      irTabela: [                 // tabela mensal a partir de mai/2025 (MP 1.294/2025)
+        { ate: 242880,   aliq: 0,     deduzir: 0     },
+        { ate: 282665,   aliq: 0.075, deduzir: 18216 },
+        { ate: 375105,   aliq: 0.15,  deduzir: 39416 },
+        { ate: 466468,   aliq: 0.225, deduzir: 67549 },
+        { ate: Infinity, aliq: 0.275, deduzir: 90873 },
+      ],
+      irDepCents: 18959,          // dedução por dependente
+      irSimplCents: 60720,        // desconto simplificado mensal
+      redutor5mil: false,
+    },
+    '2026': {
+      smCents: 163100,            // R$ 1.631,00 — confirme o valor oficial do decreto
+      minimoDecretoCents: 60000,
+      irTabela: [                 // tabela mantida; isenção ampliada via redutor (Lei 15.270/2025)
+        { ate: 242880,   aliq: 0,     deduzir: 0     },
+        { ate: 282665,   aliq: 0.075, deduzir: 18216 },
+        { ate: 375105,   aliq: 0.15,  deduzir: 39416 },
+        { ate: 466468,   aliq: 0.225, deduzir: 67549 },
+        { ate: Infinity, aliq: 0.275, deduzir: 90873 },
+      ],
+      irDepCents: 18959,
+      irSimplCents: 60720,
+      redutor5mil: true,          // isenção até R$ 5.000/mês com redutor até R$ 7.350
+    },
+  };
+
+  let ANO = '2026';
+  let P = PARAMETROS_ANUAIS[ANO];
+
+  const LIMITE_CONSIGNAVEL = 0.35;    // 35% margem empréstimo consignado
+  const LIMITE_CARTAO_CONSIG = 0.05;  // +5% cartão consignado (Lei 14.431/2022)
+
+  // ============================================================
+  // DINHEIRO EM CENTAVOS — evita erros de ponto flutuante
+  // Todos os cálculos internos usam inteiros (centavos).
+  // ============================================================
+  function parseMoney(str) {
+    // "1.234,56" -> 123456 (centavos)
+    if (!str) return 0;
+    const limpo = String(str).replace(/[^\d]/g, '');
+    return limpo ? parseInt(limpo, 10) : 0;
+  }
+
+  function fmtCents(cents) {
+    return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  }
+
+  function fmtCentsPlain(cents) {
+    return (cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function pct(v) {
+    return v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+  }
+
+  // Máscara monetária: digita números, formata como centavos
+  function aplicarMascara(input) {
+    input.addEventListener('input', () => {
+      const cents = parseMoney(input.value);
+      input.value = cents === 0 ? '' : fmtCentsPlain(cents);
+      atualizarCascata();
+    });
+  }
+
+  function getCents(id) {
+    return parseMoney(document.getElementById(id).value);
+  }
+
+  // Salário mínimo: o valor do campo editável prevalece sobre o do ano
+  function getSMCents() {
+    const manual = parseMoney(document.getElementById('salarioMinimo').value);
+    return manual > 0 ? manual : P.smCents;
+  }
+
+  function aplicarAno() {
+    ANO = document.getElementById('anoReferencia').value;
+    P = PARAMETROS_ANUAIS[ANO];
+    document.getElementById('salarioMinimo').value = fmtCentsPlain(P.smCents);
+    atualizarLabelsAno();
+    atualizarCascata();
+  }
+
+  function atualizarLabelsAno() {
+    const sm = getSMCents();
+    const opt = document.querySelector('#criterioMinimo option[value="sm"]');
+    if (opt) opt.textContent = `1 Salário Mínimo (${fmtCents(sm)}) — tese doutrinária`;
+    const optAuto = document.querySelector('#situacaoIR option[value="auto"]');
+    if (optAuto) optAuto.textContent = `Pagante — calcular IRRF automaticamente (tabela ${ANO})`;
+  }
+
+  // ============================================================
+  // IRRF — tabela progressiva mensal do ano de referência.
+  // Em 2026, aplica-se o redutor da Lei 15.270/2025: isenção até
+  // R$ 5.000/mês e redução decrescente até R$ 7.350/mês.
+  // ============================================================
+  function calcularIRRF(rendaBruta, inss, pensao, nDependentes) {
+    if (rendaBruta <= 0) return { valor: 0, detalhe: '—' };
+    // Base legal: deduções legais (INSS + pensão judicial + dependentes)
+    const baseLegal = Math.max(rendaBruta - inss - pensao - nDependentes * P.irDepCents, 0);
+    // Base alternativa: desconto simplificado (substitui as deduções)
+    const baseSimplificada = Math.max(rendaBruta - P.irSimplCents, 0);
+    // Aplica-se a base que resulta em menor imposto (regra da RFB desde mai/2023)
+    const base = Math.min(baseLegal, baseSimplificada);
+    const faixa = P.irTabela.find(f => base <= f.ate);
+    let imposto = Math.max(Math.round(base * faixa.aliq) - faixa.deduzir, 0);
+    const usouSimplificado = baseSimplificada < baseLegal;
+    let notaRedutor = '';
+
+    if (P.redutor5mil && imposto > 0) {
+      // Lei 15.270/2025: redutor mensal = R$ 978,62 − 13,31446% × rendimento
+      // (zera o IR até R$ 5.000 e decresce linearmente até R$ 7.350)
+      if (rendaBruta <= 500000) {
+        notaRedutor = ' · redutor Lei 15.270/2025: isenção integral (renda ≤ R$ 5.000)';
+        imposto = 0;
+      } else if (rendaBruta <= 735000) {
+        const redutor = Math.max(Math.round(97862 - 0.1331446 * rendaBruta), 0);
+        const aplicado = Math.min(redutor, imposto);
+        imposto -= aplicado;
+        notaRedutor = ' · redutor Lei 15.270/2025: − ' + fmtCents(aplicado);
+      }
+    }
+
+    const faixaIsenta = P.irTabela[0].ate;
+    return {
+      valor: imposto,
+      detalhe: imposto === 0
+        ? 'Base de cálculo ' + fmtCents(base) + ' — isento' +
+          (notaRedutor || ' (faixa de isenção até ' + fmtCents(faixaIsenta) + ')')
+        : 'Base ' + fmtCents(base) + (usouSimplificado ? ' (desconto simplificado)' : ' (deduções legais)') +
+          ' · alíquota ' + (faixa.aliq * 100).toLocaleString('pt-BR') + '% · parcela a deduzir ' + fmtCents(faixa.deduzir) + notaRedutor
+    };
+  }
+
+  const MOLESTIAS = {
+    neoplasia: 'Neoplasia maligna (câncer)',
+    cardiopatia: 'Cardiopatia grave',
+    aids: 'AIDS',
+    parkinson: 'Doença de Parkinson',
+    esclerose: 'Esclerose múltipla',
+    renal: 'Nefropatia grave',
+    hepatopatia: 'Hepatopatia grave',
+    tuberculose: 'Tuberculose ativa',
+    hanseniase: 'Hanseníase',
+    alienacao: 'Alienação mental',
+    cegueira: 'Cegueira (inclusive monocular)',
+    paralisia: 'Paralisia irreversível e incapacitante',
+    espondiloartrose: 'Espondiloartrose anquilosante',
+    osteite: 'Osteíte deformante (doença de Paget)',
+    contaminacao: 'Contaminação por radiação',
+    fibrose: 'Fibrose cística (mucoviscidose)',
+  };
+
+  function alternarIR() {
+    const s = document.getElementById('situacaoIR').value;
+    document.getElementById('grupoIRManual').style.display = s === 'manual' ? 'block' : 'none';
+    document.getElementById('grupoIRAuto').style.display = s === 'auto' ? 'block' : 'none';
+    document.getElementById('grupoIRDependentes').style.display = s === 'auto' ? 'block' : 'none';
+    document.getElementById('grupoMolestia').style.display = s === 'isento_molestia' ? 'block' : 'none';
+    atualizarCascata();
+  }
+
+  // Resolve o IRRF conforme a situação escolhida
+  function resolverIRRF(rendaBruta, inss, pensao) {
+    const s = document.getElementById('situacaoIR').value;
+    if (s === 'manual') {
+      return { valor: getCents('descIRRF'), origem: 'manual' };
+    }
+    if (s === 'auto') {
+      const nDep = parseInt(document.getElementById('dependentesIR').value) || 0;
+      const calc = calcularIRRF(rendaBruta, inss, pensao, nDep);
+      document.getElementById('irrfCalculado').textContent = fmtCents(calc.valor);
+      document.getElementById('irrfDetalhe').textContent = calc.detalhe;
+      return { valor: calc.valor, origem: 'auto', detalhe: calc.detalhe };
+    }
+    // Isento (moléstia grave, faixa ou outro)
+    return { valor: 0, origem: s };
+  }
+
+  // ============================================================
+  // COMPOSIÇÃO DA RENDA (cadeia correta)
+  // ============================================================
+  function comporRenda() {
+    const rendaBruta   = getCents('rendaBruta');
+    const inss         = getCents('descINSS');
+    const pensao       = getCents('descPensao');
+    const outros       = getCents('descOutros');
+    const consignado   = getCents('descConsignado');
+    const ir           = resolverIRRF(rendaBruta, inss, pensao);
+    const irrf         = ir.valor;
+
+    const descObrigatorios = inss + irrf + pensao + outros;
+    const rendaLiquida     = rendaBruta - descObrigatorios;
+    const rendaEfetiva     = rendaLiquida - consignado;
+
+    // Margem consignável: 35% (+5% cartão) sobre a renda após descontos obrigatórios
+    // (base de cálculo da margem conforme Lei 14.431/2022: remuneração disponível)
+    const margemConsignavel = Math.round(rendaLiquida * LIMITE_CONSIGNAVEL);
+    const margemTotal       = Math.round(rendaLiquida * (LIMITE_CONSIGNAVEL + LIMITE_CARTAO_CONSIG));
+    const consignadoPct     = rendaLiquida > 0 ? (consignado / rendaLiquida) * 100 : 0;
+    const excessoConsignado = consignado - margemTotal;
+
+    return {
+      rendaBruta, descObrigatorios, rendaLiquida, consignado, rendaEfetiva,
+      margemConsignavel, margemTotal, consignadoPct, excessoConsignado,
+      inss, irrf, pensao, outros,
+      situacaoIR: ir.origem, irrfDetalhe: ir.detalhe || null
+    };
+  }
+
+  function minimoExistencial(r) {
+    const criterio = document.getElementById('criterioMinimo').value;
+    const dep = parseInt(document.getElementById('dependentes').value) || 1;
+    const despesas = getCents('despesasEssenciais');
+    const sm = getSMCents();
+    switch (criterio) {
+      case 'decreto':   return { valor: P.minimoDecretoCents, base: 'Decreto 11.150/2022 — R$ 600,00 fixo' };
+      case 'sm':        return { valor: sm, base: '1 salário mínimo (tese doutrinária)' };
+      case 'sm_familia':return { valor: Math.min(dep, 5) * sm, base: dep + ' × salário mínimo (família)' };
+      case 'despesas':  return { valor: despesas, base: 'Despesas essenciais reais comprovadas' };
+      default:          return { valor: sm, base: '1 salário mínimo' };
+    }
+  }
+
+  function atualizarCascata() {
+    const r = comporRenda();
+    document.getElementById('cRendaBruta').textContent   = fmtCents(r.rendaBruta);
+    document.getElementById('cDescObrig').textContent    = '− ' + fmtCents(r.descObrigatorios);
+    document.getElementById('cRendaLiquida').textContent = fmtCents(r.rendaLiquida);
+    document.getElementById('cConsignado').textContent   = '− ' + fmtCents(r.consignado);
+    document.getElementById('cRendaEfetiva').textContent = fmtCents(r.rendaEfetiva);
+
+    document.getElementById('rowEfetiva').classList.toggle('negativa', r.rendaEfetiva < 0);
+
+    const alerta = document.getElementById('alertaConsignado');
+    if (r.rendaLiquida > 0 && r.consignado > r.margemTotal) {
+      alerta.innerHTML = `<div class="alerta-inline">⛔ <b>Margem consignável estourada:</b> os consignados (${fmtCents(r.consignado)} = ${pct(r.consignadoPct)}) superam o limite legal de 40% da renda líquida (35% empréstimo + 5% cartão = ${fmtCents(r.margemTotal)}). Excesso de ${fmtCents(r.excessoConsignado)} — passível de revisão judicial.</div>`;
+    } else if (r.rendaLiquida > 0 && r.consignado > r.margemConsignavel) {
+      alerta.innerHTML = `<div class="alerta-inline" style="background:#fffbea;border-color:#e6c45a;color:#5a4000">⚠️ Consignados (${pct(r.consignadoPct)}) acima da margem de 35% para empréstimos — verificar se o excedente é cartão consignado (margem extra de 5%).</div>`;
+    } else {
+      alerta.innerHTML = '';
+    }
+  }
+
+  // ============================================================
+  // DÍVIDAS
+  // ============================================================
+  let dividas = [];
+  let proximoId = 0;
+
+  const TIPOS_DIVIDA = [
+    { value: 'cartao',       label: 'Cartão de Crédito',          natureza: 'Crédito Rotativo', protegida: false },
+    { value: 'cheque',       label: 'Cheque Especial',            natureza: 'Crédito Bancário', protegida: false },
+    { value: 'emprestimo',   label: 'Empréstimo Pessoal',         natureza: 'Crédito Pessoal',  protegida: false },
+    { value: 'consignado',   label: 'Crédito Consignado',         natureza: 'Consignado',        protegida: false },
+    { value: 'financiamento_imovel', label: 'Financiamento Imóvel', natureza: 'Garantia Real',  protegida: true  },
+    { value: 'financiamento_veiculo', label: 'Financiamento Veículo', natureza: 'Garantia Real', protegida: false },
+    { value: 'aluguel',      label: 'Aluguel em Atraso',          natureza: 'Obrigação Cível',  protegida: false },
+    { value: 'alimentos',    label: 'Pensão Alimentícia',         natureza: 'Alimentos',         protegida: false },
+    { value: 'condominio',   label: 'Condomínio em Atraso',       natureza: 'Obrigação Real',    protegida: false },
+    { value: 'fiscal',       label: 'Débito Fiscal / Tributário', natureza: 'Fiscal',            protegida: false },
+    { value: 'energia',      label: 'Energia / Água / Gás',       natureza: 'Concessionária',    protegida: false },
+    { value: 'saude',        label: 'Plano de Saúde',             natureza: 'Serviço Essencial', protegida: false },
+    { value: 'educacao',     label: 'Escola / Faculdade',         natureza: 'Serviço Educação',  protegida: false },
+    { value: 'outro',        label: 'Outro',                      natureza: 'Outros',            protegida: false },
+  ];
+
+  function getTipo(value) {
+    return TIPOS_DIVIDA.find(t => t.value === value) || TIPOS_DIVIDA[TIPOS_DIVIDA.length - 1];
+  }
+
+  function adicionarDivida(credor = '', tipo = 'cartao', saldoCents = 0, parcelaCents = 0, emFolha = false, parcContratadas = '', parcPagas = '') {
+    const id = proximoId++;
+    dividas.push({ id, credor, tipo, saldoCents, parcelaCents, emFolha, parcContratadas, parcPagas });
+    renderDividas();
+  }
+
+  function removerDivida(id) {
+    dividas = dividas.filter(d => d.id !== id);
+    renderDividas();
+  }
+
+  function renderDividas() {
+    const list = document.getElementById('debtList');
+    list.innerHTML = '';
+    if (dividas.length === 0) {
+      list.innerHTML = '<div style="color:var(--text-muted);font-size:0.87rem;padding:8px 0">Nenhuma dívida adicionada ainda.</div>';
+      return;
+    }
+    dividas.forEach(d => {
+      const el = document.createElement('div');
+      el.className = 'debt-item';
+      const opts = TIPOS_DIVIDA.map(t =>
+        `<option value="${t.value}" ${t.value === d.tipo ? 'selected' : ''}>${t.label}</option>`
+      ).join('');
+      el.innerHTML = `
+        <div class="debt-item-row">
+          <div class="form-group" style="margin:0">
+            <label>Credor / Descrição</label>
+            <input type="text" value="${d.credor}" placeholder="Ex.: Banco Itaú"
+              onchange="atualizarDivida(${d.id},'credor',this.value)" />
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Tipo</label>
+            <select onchange="atualizarDivida(${d.id},'tipo',this.value)">${opts}</select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Saldo Devedor</label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" inputmode="numeric" value="${d.saldoCents ? fmtCentsPlain(d.saldoCents) : ''}" placeholder="0,00"
+                oninput="mascararDividaInput(this, ${d.id}, 'saldoCents')" />
+            </div>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Parcela/mês</label>
+            <div class="input-currency"><span>R$</span>
+              <input type="text" class="money" inputmode="numeric" value="${d.parcelaCents ? fmtCentsPlain(d.parcelaCents) : ''}" placeholder="0,00"
+                oninput="mascararDividaInput(this, ${d.id}, 'parcelaCents')" />
+            </div>
+          </div>
+          <button class="btn-remove" onclick="removerDivida(${d.id})" title="Remover">✕</button>
+        </div>
+        <div class="debt-parcelas-row">
+          <div class="form-group" style="margin:0">
+            <label>Parcelas contratadas</label>
+            <input type="text" inputmode="numeric" value="${d.parcContratadas || ''}" placeholder="Ex.: 48"
+              oninput="atualizarDivida(${d.id},'parcContratadas',this.value); refreshRestantes(${d.id})" />
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Parcelas pagas</label>
+            <input type="text" inputmode="numeric" value="${d.parcPagas || ''}" placeholder="Ex.: 12"
+              oninput="atualizarDivida(${d.id},'parcPagas',this.value); refreshRestantes(${d.id})" />
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Parcelas a pagar</label>
+            <input type="text" id="restantes${d.id}" readonly value="${calcRestantes(d)}"
+              style="background:#eef3f8;font-weight:700;color:var(--primary)" />
+          </div>
+        </div>
+        <div class="debt-folha-flag">
+          <input type="checkbox" id="folha${d.id}" ${d.emFolha ? 'checked' : ''}
+            onchange="atualizarDivida(${d.id},'emFolha',this.checked)" />
+          <label for="folha${d.id}" style="margin:0;text-transform:none;letter-spacing:0;font-weight:500;cursor:pointer">
+            Parcela já descontada em folha (consignado) — não somar de novo no comprometimento mensal
+          </label>
+          <button class="btn btn-outline" style="margin-left:auto;padding:6px 12px;font-size:0.8rem" onclick="document.getElementById('fileContrato${d.id}').click()">📎 Ler contrato com IA</button>
+          <input type="file" id="fileContrato${d.id}" accept=".pdf,image/*" style="display:none" onchange="lerContratoIA(this, ${d.id})" />
+        </div>
+        <div id="iaContratoStatus${d.id}"></div>
+      `;
+      list.appendChild(el);
+    });
+  }
+
+  function mascararDividaInput(input, id, campo) {
+    const cents = parseMoney(input.value);
+    input.value = cents === 0 ? '' : fmtCentsPlain(cents);
+    atualizarDivida(id, campo, cents);
+  }
+
+  function atualizarDivida(id, campo, valor) {
+    const d = dividas.find(x => x.id === id);
+    if (d) d[campo] = valor;
+  }
+
+  function calcRestantes(d) {
+    const contr = parseInt(d.parcContratadas) || 0;
+    const pagas = parseInt(d.parcPagas) || 0;
+    if (contr === 0) return '—';
+    return Math.max(contr - pagas, 0);
+  }
+
+  function refreshRestantes(id) {
+    const d = dividas.find(x => x.id === id);
+    const el = document.getElementById('restantes' + id);
+    if (d && el) el.value = calcRestantes(d);
+  }
+
+  function setMoneyField(id, cents) {
+    document.getElementById(id).value = cents ? fmtCentsPlain(cents) : '';
+  }
+
+  // ============================================================
+  // LEITURA INTELIGENTE DE DOCUMENTOS (IA — backend)
+  // ============================================================
+  function reaisToCents(v) {
+    if (v === null || v === undefined || v === '' || isNaN(v)) return 0;
+    return Math.round(parseFloat(v) * 100);
+  }
+
+  function fillMoneyReais(id, reais) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const c = reaisToCents(reais);
+    el.value = c ? fmtCentsPlain(c) : '';
+  }
+
+  function iaStatus(elId, tipo, msg) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const cores = {
+      load:    ['#e8f0f8', '#1a3a5c', '⏳'],
+      ok:      ['#e8f5e9', '#1b5e20', '✅'],
+      erro:    ['#fdecea', '#7a2218', '⚠️'],
+    };
+    const [bg, cor, icone] = cores[tipo] || cores.load;
+    el.innerHTML = msg
+      ? `<div style="background:${bg};color:${cor};border-radius:8px;padding:10px 14px;margin:8px 0;font-size:0.84rem;line-height:1.5">${icone} ${msg}</div>`
+      : '';
+  }
+
+  async function enviarDocumento(endpoint, file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch(endpoint, { method: 'POST', body: fd });
+    if (resp.status === 404 || resp.status === 405) {
+      const e = new Error('sem-backend'); e.semBackend = true; throw e;
+    }
+    const json = await resp.json().catch(() => ({ ok: false, erro: 'Resposta inválida do servidor.' }));
+    if (!resp.ok || !json.ok) {
+      throw new Error(json.erro || ('Erro ' + resp.status));
+    }
+    return json.dados;
+  }
+
+  const MSG_SEM_SERVIDOR = 'A leitura por IA exige o servidor rodando (python server.py). ' +
+    'Abrindo o arquivo direto no navegador, preencha os campos manualmente. Veja o README.';
+
+  async function lerHoleriteIA(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    iaStatus('iaHoleriteStatus', 'load', `Lendo "${file.name}" com IA… isso pode levar alguns segundos.`);
+    try {
+      const d = await enviarDocumento('/api/extract-holerite', file);
+      if (d.nome) document.getElementById('nome').value = d.nome;
+      fillMoneyReais('rendaBruta', d.renda_bruta);
+      fillMoneyReais('descINSS', d.inss);
+      fillMoneyReais('descPensao', d.pensao);
+      fillMoneyReais('descOutros', d.outros_descontos);
+      fillMoneyReais('descConsignado', d.consignados_total);
+      // IRRF: usa o valor real do holerite (modo manual)
+      if (d.irrf !== null && d.irrf !== undefined) {
+        document.getElementById('situacaoIR').value = 'manual';
+        alternarIR();
+        fillMoneyReais('descIRRF', d.irrf);
+      }
+      // Cria as dívidas de consignado identificadas (já em folha)
+      let nConsig = 0;
+      (d.consignados || []).forEach(c => {
+        if (c && (c.parcela || c.credor)) {
+          adicionarDivida(c.credor || 'Consignado', 'consignado', 0, reaisToCents(c.parcela), true);
+          nConsig++;
+        }
+      });
+      atualizarCascata();
+      const extra = nConsig ? ` ${nConsig} consignado(s) adicionado(s) às dívidas.` : '';
+      const obs = d.observacoes ? `<br><span style="opacity:0.8">Obs.: ${d.observacoes}</span>` : '';
+      iaStatus('iaHoleriteStatus', 'ok', `Holerite lido e campos preenchidos.${extra} Confira os valores antes de calcular.${obs}`);
+    } catch (e) {
+      const msg = (e instanceof TypeError || e.semBackend) ? MSG_SEM_SERVIDOR : ('Não foi possível ler o documento: ' + e.message);
+      iaStatus('iaHoleriteStatus', 'erro', msg);
+    } finally {
+      input.value = '';
+    }
+  }
+
+  async function lerContratoIA(input, id) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const statusId = 'iaContratoStatus' + id;
+    iaStatus(statusId, 'load', `Lendo "${file.name}" com IA…`);
+    try {
+      const d = await enviarDocumento('/api/extract-contrato', file);
+      const dv = dividas.find(x => x.id === id);
+      if (!dv) return;
+      if (d.credor) dv.credor = d.credor;
+      if (d.tipo && getTipo(d.tipo).value === d.tipo) dv.tipo = d.tipo;
+      if (d.saldo_devedor !== null && d.saldo_devedor !== undefined) dv.saldoCents = reaisToCents(d.saldo_devedor);
+      if (d.parcela_mensal !== null && d.parcela_mensal !== undefined) dv.parcelaCents = reaisToCents(d.parcela_mensal);
+      if (d.parcelas_contratadas !== null && d.parcelas_contratadas !== undefined) dv.parcContratadas = d.parcelas_contratadas;
+      if (d.parcelas_pagas !== null && d.parcelas_pagas !== undefined) dv.parcPagas = d.parcelas_pagas;
+      if (d.em_folha === true || d.em_folha === false) dv.emFolha = d.em_folha;
+      renderDividas();
+      const obs = d.observacoes ? `<br><span style="opacity:0.8">Obs.: ${d.observacoes}</span>` : '';
+      const juros = d.taxa_juros ? ` Juros informados: ${d.taxa_juros}.` : '';
+      iaStatus(statusId, 'ok', `Contrato lido e campos preenchidos.${juros} Confira antes de calcular.${obs}`);
+    } catch (e) {
+      const msg = (e instanceof TypeError || e.semBackend) ? MSG_SEM_SERVIDOR : ('Não foi possível ler o contrato: ' + e.message);
+      iaStatus(statusId, 'erro', msg);
+    } finally {
+      input.value = '';
+    }
+  }
+
+  // ============================================================
+  // DESPESAS ESSENCIAIS DISCRIMINADAS
+  // ============================================================
+  const DESPESAS_CATEGORIAS = [
+    { key: 'moradia',         label: 'Moradia (aluguel/prestação)' },
+    { key: 'condominio',      label: 'Condomínio' },
+    { key: 'luz',             label: 'Luz / energia' },
+    { key: 'agua',            label: 'Água / esgoto' },
+    { key: 'gas',             label: 'Gás' },
+    { key: 'internet',        label: 'Internet' },
+    { key: 'telefone',        label: 'Telefone' },
+    { key: 'comida',          label: 'Alimentação' },
+    { key: 'remedios',        label: 'Remédios' },
+    { key: 'planoSaude',      label: 'Plano de saúde' },
+    { key: 'transporte',      label: 'Transporte' },
+    { key: 'combustivel',     label: 'Gasolina / combustível' },
+    { key: 'parcelaCarro',    label: 'Parcela do carro' },
+    { key: 'ipva',            label: 'IPVA' },
+    { key: 'seguroCarro',     label: 'Seguro do carro' },
+    { key: 'iptu',            label: 'IPTU' },
+    { key: 'escola',          label: 'Escola' },
+    { key: 'faculdade',       label: 'Faculdade' },
+    { key: 'transporteEscolar', label: 'Transporte escolar' },
+    { key: 'vestuario',       label: 'Vestuário' },
+    { key: 'pet',             label: 'Pet' },
+    { key: 'eletrodomesticos',label: 'Eletrodomésticos' },
+    { key: 'ajudaFamiliares', label: 'Ajuda a familiares' },
+    { key: 'demaisGastos',    label: 'Demais gastos' },
+  ];
+
+  function despesaInputId(key) { return 'desp_' + key; }
+
+  function renderDespesas() {
+    const grid = document.getElementById('despesasGrid');
+    grid.innerHTML = DESPESAS_CATEGORIAS.map(c => `
+      <div class="despesa-item">
+        <label>${c.label}</label>
+        <div class="input-currency"><span>R$</span>
+          <input type="text" class="money-desp" inputmode="numeric" id="${despesaInputId(c.key)}" placeholder="0,00" />
+        </div>
+      </div>
+    `).join('') + `
+      <div class="despesa-total-row">
+        <span>Total das despesas essenciais</span>
+        <span id="despesasTotalGrid">R$ 0,00</span>
+      </div>`;
+    grid.querySelectorAll('input.money-desp').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const cents = parseMoney(inp.value);
+        inp.value = cents === 0 ? '' : fmtCentsPlain(cents);
+        recalcDespesas();
+      });
+    });
+  }
+
+  function somaDespesas() {
+    return DESPESAS_CATEGORIAS.reduce((s, c) => {
+      const el = document.getElementById(despesaInputId(c.key));
+      return s + (el ? parseMoney(el.value) : 0);
+    }, 0);
+  }
+
+  function recalcDespesas() {
+    const total = somaDespesas();
+    document.getElementById('despesasEssenciais').value = total ? fmtCentsPlain(total) : '';
+    const tg = document.getElementById('despesasTotalGrid');
+    if (tg) tg.textContent = fmtCents(total);
+    document.getElementById('despesasTotalMini').textContent = fmtCents(total);
+    atualizarCascata();
+  }
+
+  function toggleDespesas() {
+    const grid = document.getElementById('despesasGrid');
+    const aberto = grid.style.display !== 'none';
+    grid.style.display = aberto ? 'none' : 'grid';
+    document.getElementById('despesasSeta').textContent = aberto ? '▸' : '▾';
+  }
+
+  // ============================================================
+  // CONTEXTO SOCIAL (Res. CNJ 492/2023)
+  // ============================================================
+  function getContexto() {
+    const g = id => document.getElementById(id).value;
+    return {
+      genero: g('ctxGenero'),
+      idade: g('ctxIdade'),
+      escolaridade: g('ctxEscolaridade'),
+      dependentes: g('ctxDependentes'),
+      enfermidade: g('ctxEnfermidade'),
+      violencia: g('ctxViolencia'),
+      bets: g('ctxBets'),
+    };
+  }
+
+  function renderContextoSocial() {
+    const c = getContexto();
+    const itens = [];
+    if (c.genero) itens.push(['Gênero', c.genero, false]);
+    if (c.idade) itens.push(['Idade', c.idade + ' anos', false]);
+    if (c.escolaridade) itens.push(['Escolaridade', c.escolaridade, false]);
+    if (c.dependentes) itens.push(['Dependentes', c.dependentes, false]);
+    if (c.enfermidade) itens.push(['Enfermidade crônica c/ gastos', c.enfermidade, c.enfermidade === 'Sim']);
+    if (c.violencia) itens.push(['Violência doméstica / medida protetiva', c.violencia, c.violencia === 'Sim']);
+    if (c.bets) itens.push(['Dívidas com "bets" (apostas)', c.bets, c.bets === 'Sim']);
+
+    const sec = document.getElementById('ctxSection');
+    if (itens.length === 0) { sec.style.display = 'none'; return; }
+    sec.style.display = 'block';
+    document.getElementById('ctxConteudo').innerHTML = `
+      <div class="ctx-grid">
+        ${itens.map(([l, v, alerta]) => `
+          <div class="ctx-item ${alerta ? 'alerta' : ''}">
+            <span class="ctx-lbl">${l}</span>
+            <span class="ctx-v">${v}</span>
+          </div>`).join('')}
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:12px">
+        Dados coletados para julgamento com perspectiva de gênero (Res. CNJ nº 492/2023). Informações sensíveis devem tramitar sob segredo de justiça.
+      </p>`;
+  }
+
+  function adicionarDividasExemplo() {
+    dividas = [];
+    proximoId = 0;
+    adicionarDivida('Banco Bradesco', 'cartao', 1850000, 95000, false, 24, 6);
+    adicionarDivida('Caixa Econômica Federal', 'consignado', 3500000, 120000, true, 60, 18);
+    adicionarDivida('Banco do Brasil', 'emprestimo', 1200000, 62000, false, 36, 10);
+    adicionarDivida('Financeira XP', 'financiamento_veiculo', 2800000, 89000, false, 48, 20);
+    adicionarDivida('Condomínio Residencial', 'condominio', 450000, 30000, false, 15, 0);
+    setMoneyField('rendaBruta', 580000);
+    setMoneyField('descINSS', 60000);
+    document.getElementById('situacaoIR').value = 'auto';
+    document.getElementById('dependentesIR').value = '2';
+    alternarIR();
+    setMoneyField('descPensao', 0);
+    setMoneyField('descOutros', 5000);
+    setMoneyField('descConsignado', 120000);
+    document.getElementById('dependentes').value = '3';
+    // Despesas essenciais discriminadas
+    const exDesp = { moradia: 90000, condominio: 25000, luz: 18000, agua: 8000, gas: 9000,
+      comida: 120000, remedios: 15000, planoSaude: 32000, combustivel: 25000, escola: 40000 };
+    Object.entries(exDesp).forEach(([k, v]) => { const el = document.getElementById(despesaInputId(k)); if (el) el.value = fmtCentsPlain(v); });
+    recalcDespesas();
+    setMoneyField('patrimonio', 9500000);
+    // Contexto social (Res. CNJ 492/2023)
+    document.getElementById('ctxGenero').value = 'Feminino';
+    document.getElementById('ctxIdade').value = '38';
+    document.getElementById('ctxEscolaridade').value = 'Ensino médio completo';
+    document.getElementById('ctxDependentes').value = '2';
+    document.getElementById('ctxEnfermidade').value = 'Não';
+    document.getElementById('ctxViolencia').value = 'Não';
+    document.getElementById('ctxBets').value = 'Não';
+    atualizarCascata();
+  }
+
+  // ============================================================
+  // CÁLCULO PRINCIPAL
+  // ============================================================
+  function calcular() {
+    const r = comporRenda();
+    const nome = document.getElementById('nome').value || 'Devedor';
+    const dep = parseInt(document.getElementById('dependentes').value) || 1;
+    const despEssenciais = getCents('despesasEssenciais');
+    const patrimonio = getCents('patrimonio');
+    const catDevedor = document.getElementById('categoriaDevedor').value;
+    const imovel = document.getElementById('imovelProprio').value;
+    const execucoes = document.getElementById('execucoes').value;
+
+    if (r.rendaBruta === 0) { alert('Informe a renda bruta mensal.'); return; }
+    if (r.rendaLiquida < 0) { alert('Os descontos obrigatórios superam a renda bruta. Verifique os valores.'); return; }
+    if (dividas.length === 0) { alert('Adicione ao menos uma dívida.'); return; }
+
+    const minimo = minimoExistencial(r);
+
+    // Parcelas mensais: somar apenas as NÃO descontadas em folha
+    // (consignados já reduziram a renda efetiva — evita dupla contagem)
+    let totalSaldo = 0;
+    let parcelasFora = 0;   // parcelas pagas com a renda efetiva
+    let parcelasFolha = 0;  // já descontadas em folha (informativo)
+    dividas.forEach(d => {
+      totalSaldo += d.saldoCents || 0;
+      if (d.emFolha) parcelasFolha += d.parcelaCents || 0;
+      else parcelasFora += d.parcelaCents || 0;
+    });
+
+    // Comprometimento mensal total = consignados em folha + parcelas fora da folha
+    const comprometimentoMensal = r.consignado + parcelasFora;
+    const comprometimentoPct = r.rendaLiquida > 0 ? (comprometimentoMensal / r.rendaLiquida) * 100 : 0;
+
+    // Renda disponível para pagar dívidas fora da folha:
+    // renda efetiva − mínimo existencial (ou despesas reais, o que for maior se critério = despesas)
+    const reservaVital = Math.max(minimo.valor, document.getElementById('criterioMinimo').value === 'despesas' ? despEssenciais : 0);
+    const rendaDisponivel = r.rendaEfetiva - reservaVital;
+    const sobraAposTudo = rendaDisponivel - parcelasFora;
+
+    const indiceDP = patrimonio > 0 ? (totalSaldo / patrimonio) * 100 : null;
+    const mesesQuitar = rendaDisponivel > 0 ? Math.ceil(totalSaldo / rendaDisponivel) : null;
+
+    // ---- PLANO DE PAGAMENTO (art. 104-A/104-B CDC) ----
+    // Prazo legal máximo de 5 anos (60 meses) e parcela limitada a 30%–35%
+    // da renda líquida, preservado o mínimo existencial.
+    const PRAZO_MAX = 60;
+    const cap30 = Math.round(r.rendaLiquida * 0.30);
+    const cap35 = Math.round(r.rendaLiquida * 0.35);
+    const tetoParcela = Math.min(cap35, Math.max(rendaDisponivel, 0)); // não pode comprometer o mínimo existencial
+    const parcelaPor60 = Math.ceil(totalSaldo / PRAZO_MAX);            // mínimo p/ quitar em 60 meses
+    let parcelaSugerida, planoViavel, planoNota;
+    if (parcelaPor60 <= tetoParcela) {
+      parcelaSugerida = parcelaPor60;
+      planoViavel = true;
+      planoNota = 'A parcela necessária para quitar em 60 meses cabe na capacidade de pagamento (até 35% da renda líquida), preservado o mínimo existencial.';
+    } else {
+      parcelaSugerida = Math.max(tetoParcela, 0);
+      planoViavel = false;
+      planoNota = parcelaSugerida > 0
+        ? 'Mesmo no prazo máximo de 60 meses, a parcela necessária supera o teto de 35% da renda líquida / a renda disponível. Recomenda-se requerer dilação, redução de encargos e/ou remição parcial do débito (art. 104-B, §4º, I, CDC).'
+        : 'A renda disponível após o mínimo existencial é insuficiente para qualquer parcela. Impõe-se a revisão/remição substancial do passivo e a suspensão das cobranças.';
+    }
+    const mesesPlano = parcelaSugerida > 0 ? Math.ceil(totalSaldo / parcelaSugerida) : null;
+    const parcelaSugeridaPct = r.rendaLiquida > 0 ? (parcelaSugerida / r.rendaLiquida) * 100 : 0;
+    const dentroDe30a35 = parcelaSugeridaPct >= 30 && parcelaSugeridaPct <= 35;
+
+    // SITUAÇÃO (art. 54-A, §1º CDC):
+    // superendividado = incapaz de pagar a totalidade das dívidas sem comprometer o mínimo existencial
+    const isSuperEndividado = sobraAposTudo < 0 || rendaDisponivel <= 0;
+    const isLimite = !isSuperEndividado && comprometimentoPct >= 30;
+
+    // Percentuais p/ barras (sobre renda líquida)
+    const pOver = c => r.rendaLiquida > 0 ? (c / r.rendaLiquida) * 100 : 0;
+    const consigPct = pOver(r.consignado);
+    const minPct    = pOver(minimo.valor);
+    const despPct   = pOver(despEssenciais);
+    const divPct    = pOver(parcelasFora);
+
+    // ---------------- RENDER ----------------
+
+    // Hero
+    const hero = document.getElementById('heroCard');
+    hero.className = 'resultado-hero ' + (isSuperEndividado ? 'superendividado' : isLimite ? 'limite' : 'saudavel');
+    document.getElementById('heroIcon').textContent = isSuperEndividado ? '🚨' : isLimite ? '⚠️' : '✅';
+    document.getElementById('heroTitulo').textContent = isSuperEndividado
+      ? `${nome} está em situação de SUPERENDIVIDAMENTO`
+      : isLimite
+      ? `${nome} está em situação de ENDIVIDAMENTO ELEVADO`
+      : `${nome} está em situação FINANCEIRA CONTROLADA`;
+
+    const heroBadge = document.getElementById('heroBadge');
+    heroBadge.textContent = isSuperEndividado ? 'Superendividado' : isLimite ? 'Risco Elevado' : 'Situação Saudável';
+    heroBadge.className = 'resultado-situacao-badge ' + (isSuperEndividado ? 'badge-danger' : isLimite ? 'badge-warning' : 'badge-success');
+
+    document.getElementById('heroSubtitulo').textContent = isSuperEndividado
+      ? `Após os descontos em folha (${fmtCents(r.consignado)} de consignados), a renda efetivamente recebida é de ${fmtCents(r.rendaEfetiva)}. Preservado o mínimo existencial de ${fmtCents(minimo.valor)}, restam ${fmtCents(Math.max(rendaDisponivel,0))} — insuficientes para as parcelas mensais de ${fmtCents(parcelasFora)}. Configurado o superendividamento (art. 54-A, §1º, CDC).`
+      : isLimite
+      ? `O comprometimento total da renda líquida (consignados + parcelas = ${fmtCents(comprometimentoMensal)}) atinge ${pct(comprometimentoPct)}, acima do patamar prudencial de 30%. Há risco concreto de superendividamento.`
+      : `O comprometimento total de ${pct(comprometimentoPct)} da renda líquida está dentro de parâmetros sustentáveis. Após todas as parcelas e o mínimo existencial, sobra ${fmtCents(sobraAposTudo)} por mês.`;
+
+    // Demonstrativo de cálculo
+    const demo = document.getElementById('demoTable');
+    const linhasDesc = [];
+    if (r.inss)   linhasDesc.push(`<tr class="menos"><td>(−) INSS / Previdência</td><td>− ${fmtCents(r.inss)}</td></tr>`);
+    if (r.irrf) {
+      const origemIR = r.situacaoIR === 'auto' ? `<span class="ref">${r.irrfDetalhe || 'calculado pela tabela progressiva 2025'}</span>` : '<span class="ref">valor informado do holerite</span>';
+      linhasDesc.push(`<tr class="menos"><td>(−) IRRF ${origemIR}</td><td>− ${fmtCents(r.irrf)}</td></tr>`);
+    } else if (r.situacaoIR === 'isento_molestia') {
+      const doenca = MOLESTIAS[document.getElementById('molestiaGrave').value] || 'moléstia grave';
+      linhasDesc.push(`<tr><td>IRRF — ISENTO <span class="ref">${doenca} — art. 6º, XIV, Lei 7.713/88</span></td><td>R$ 0,00</td></tr>`);
+    } else if (r.situacaoIR === 'isento_faixa') {
+      linhasDesc.push(`<tr><td>IRRF — ISENTO <span class="ref">renda dentro da faixa de isenção</span></td><td>R$ 0,00</td></tr>`);
+    } else if (r.situacaoIR === 'isento_outro') {
+      linhasDesc.push(`<tr><td>IRRF — ISENTO <span class="ref">outro motivo legal</span></td><td>R$ 0,00</td></tr>`);
+    } else if (r.situacaoIR === 'auto') {
+      linhasDesc.push(`<tr><td>IRRF — R$ 0,00 <span class="ref">${r.irrfDetalhe || 'base dentro da faixa de isenção'}</span></td><td>R$ 0,00</td></tr>`);
+    }
+    if (r.pensao) linhasDesc.push(`<tr class="menos"><td>(−) Pensão alimentícia em folha</td><td>− ${fmtCents(r.pensao)}</td></tr>`);
+    if (r.outros) linhasDesc.push(`<tr class="menos"><td>(−) Outros descontos obrigatórios</td><td>− ${fmtCents(r.outros)}</td></tr>`);
+
+    demo.innerHTML = `
+      <tr><td>Renda Bruta Mensal</td><td>${fmtCents(r.rendaBruta)}</td></tr>
+      ${linhasDesc.join('')}
+      <tr class="subtotal"><td>= Renda Líquida <span class="ref">base do comprometimento e da margem consignável</span></td><td>${fmtCents(r.rendaLiquida)}</td></tr>
+      <tr class="menos"><td>(−) Empréstimos consignados em folha <span class="ref">${pct(r.consignadoPct)} da renda líquida · margem legal: 35% + 5% = ${fmtCents(r.margemTotal)}</span></td><td>− ${fmtCents(r.consignado)}</td></tr>
+      <tr class="subtotal"><td>= Renda Efetivamente Recebida</td><td>${fmtCents(r.rendaEfetiva)}</td></tr>
+      <tr class="menos"><td>(−) Mínimo Existencial <span class="ref">${minimo.base}</span></td><td>− ${fmtCents(reservaVital)}</td></tr>
+      <tr class="subtotal"><td>= Renda Disponível para Dívidas</td><td>${fmtCents(rendaDisponivel)}</td></tr>
+      <tr class="menos"><td>(−) Parcelas mensais fora da folha <span class="ref">${dividas.filter(d=>!d.emFolha).length} dívida(s)</span></td><td>− ${fmtCents(parcelasFora)}</td></tr>
+      <tr class="final ${sobraAposTudo < 0 ? 'negativo' : ''}"><td>= ${sobraAposTudo < 0 ? 'DÉFICIT MENSAL' : 'Sobra Mensal'}</td><td>${fmtCents(sobraAposTudo)}</td></tr>
+    `;
+
+    // Métricas
+    document.getElementById('mRendaLiquida').textContent = fmtCents(r.rendaLiquida);
+    document.getElementById('mRendaEfetiva').textContent = fmtCents(r.rendaEfetiva);
+    document.getElementById('mMinExistencial').textContent = fmtCents(minimo.valor);
+    document.getElementById('mMinExistencialSub').textContent = minimo.base;
+    document.getElementById('mRendaDisponivel').textContent = fmtCents(rendaDisponivel);
+
+    document.getElementById('mComprometimento').textContent = pct(comprometimentoPct);
+    document.getElementById('mCardComprometimento').className =
+      'metric-card ' + (isSuperEndividado ? 'highlight-danger' : isLimite ? 'highlight-warning' : 'highlight-success');
+
+    document.getElementById('mConsignado').textContent = r.rendaLiquida > 0 ? pct(r.consignadoPct) : 'N/D';
+    document.getElementById('mCardConsignado').className =
+      'metric-card ' + (r.consignadoPct > 40 ? 'highlight-danger' : r.consignadoPct > 35 ? 'highlight-warning' : 'highlight-success');
+
+    document.getElementById('mTotalDividas').textContent = fmtCents(totalSaldo);
+
+    const mCardIndex = document.getElementById('mIndiceDivida').closest('.metric-card');
+    if (indiceDP === null) {
+      document.getElementById('mIndiceDivida').textContent = 'N/D';
+      mCardIndex.className = 'metric-card';
+    } else {
+      document.getElementById('mIndiceDivida').textContent = pct(indiceDP);
+      mCardIndex.className = 'metric-card ' + (indiceDP > 100 ? 'highlight-danger' : indiceDP > 50 ? 'highlight-warning' : 'highlight-success');
+    }
+
+    document.getElementById('mMesesQuitar').textContent =
+      mesesQuitar === null ? 'Inviável' : mesesQuitar + (mesesQuitar === 1 ? ' mês' : ' meses');
+
+    // Barras
+    const cap = v => Math.min(v, 100);
+    document.getElementById('barConsig').style.width = cap(consigPct) + '%';
+    document.getElementById('barConsigVal').textContent = pct(consigPct);
+    document.getElementById('barMinimo').style.width = cap(minPct) + '%';
+    document.getElementById('barMinimoVal').textContent = pct(minPct);
+    document.getElementById('barDespesas').style.width = cap(despPct) + '%';
+    document.getElementById('barDespesasVal').textContent = pct(despPct);
+    document.getElementById('barDividas').style.width = cap(divPct) + '%';
+    document.getElementById('barDividasVal').textContent = pct(divPct);
+
+    // Tabela de dívidas
+    const tbody = document.getElementById('tabelaDividasBody');
+    tbody.innerHTML = '';
+    dividas.forEach(d => {
+      const tipo = getTipo(d.tipo);
+      const pctRenda = r.rendaLiquida > 0 ? ((d.parcelaCents || 0) / r.rendaLiquida) * 100 : 0;
+      let tag;
+      if (d.emFolha) tag = '<span class="tag tag-folha">Em Folha</span>';
+      else if (d.tipo === 'alimentos' || d.tipo === 'fiscal') tag = '<span class="tag tag-comprometida">Impenhorável</span>';
+      else if (tipo.protegida) tag = '<span class="tag tag-protegida">Garantia Real</span>';
+      else tag = '<span class="tag tag-normal">Quirografária</span>';
+      const contr = parseInt(d.parcContratadas) || 0;
+      const pagas = parseInt(d.parcPagas) || 0;
+      const restantes = contr > 0 ? Math.max(contr - pagas, 0) : '—';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${d.credor || '—'}</strong><br><span style="font-size:0.78rem;color:var(--text-muted)">${tipo.label}</span></td>
+        <td class="td-right">${fmtCents(d.saldoCents || 0)}</td>
+        <td class="td-right">${fmtCents(d.parcelaCents || 0)}</td>
+        <td class="td-right">${contr || '—'}</td>
+        <td class="td-right">${contr > 0 ? pagas : '—'}</td>
+        <td class="td-right"><strong>${restantes}</strong></td>
+        <td class="td-right"><strong style="color:${pctRenda > 30 ? 'var(--danger)' : 'inherit'}">${pct(pctRenda)}</strong></td>
+        <td>${tag}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('tabelaDividasFoot').innerHTML = `
+      <tr class="subtotal-row">
+        <td><strong>TOTAL</strong> <span style="font-size:0.75rem;font-weight:400;color:var(--text-muted)">(em folha: ${fmtCents(parcelasFolha)} · fora: ${fmtCents(parcelasFora)})</span></td>
+        <td class="td-right"><strong>${fmtCents(totalSaldo)}</strong></td>
+        <td class="td-right"><strong>${fmtCents(parcelasFolha + parcelasFora)}</strong></td>
+        <td colspan="3"></td>
+        <td class="td-right"><strong>${pct(comprometimentoPct)}</strong></td>
+        <td></td>
+      </tr>
+    `;
+
+    // ---- Plano de Pagamento Sugerido ----
+    const planoStatusCor = planoViavel ? '#1e7e34' : '#c0392b';
+    const planoStatusBg = planoViavel ? '#edfbf0' : '#fdecea';
+    document.getElementById('planoConteudo').innerHTML = `
+      <div class="plano-grid">
+        <div class="plano-box"><div class="plano-lbl">Total do passivo</div><div class="plano-val">${fmtCents(totalSaldo)}</div></div>
+        <div class="plano-box"><div class="plano-lbl">Prazo legal máximo</div><div class="plano-val">${PRAZO_MAX} meses</div><div class="plano-sub">art. 104-B, §4º, CDC</div></div>
+        <div class="plano-box"><div class="plano-lbl">Parcela p/ quitar em 60 meses</div><div class="plano-val">${fmtCents(parcelaPor60)}</div></div>
+        <div class="plano-box"><div class="plano-lbl">Capacidade de pagamento (30%–35%)</div><div class="plano-val">${fmtCents(cap30)} – ${fmtCents(cap35)}</div><div class="plano-sub">da renda líquida (${fmtCents(r.rendaLiquida)})</div></div>
+        <div class="plano-box" style="background:${planoStatusBg};border-color:${planoStatusCor}">
+          <div class="plano-lbl">Parcela sugerida ao juízo</div>
+          <div class="plano-val" style="color:${planoStatusCor}">${fmtCents(parcelaSugerida)}/mês</div>
+          <div class="plano-sub">${pct(parcelaSugeridaPct)} da renda líquida${dentroDe30a35 ? ' ✓ (faixa 30–35%)' : ''}</div>
+        </div>
+        <div class="plano-box"><div class="plano-lbl">Prazo estimado com a parcela sugerida</div><div class="plano-val">${mesesPlano === null ? 'Inviável' : mesesPlano + ' meses'}</div></div>
+      </div>
+      <div class="alerta-inline" style="margin-top:14px;background:${planoStatusBg};border-color:${planoStatusCor};color:${planoViavel ? '#1b5e20' : '#7a2218'}">
+        ${planoViavel ? '✅' : '⚠️'} ${planoNota}
+      </div>`;
+
+    // ---- Contexto Social ----
+    renderContextoSocial();
+
+    // Enquadramento legal
+    const legal = [];
+
+    legal.push({
+      icon: '📜', cor: '#e8f0f8',
+      titulo: 'Art. 54-A, §1º do CDC — Definição de Superendividamento',
+      texto: `Superendividamento é a impossibilidade manifesta de o consumidor pessoa natural, de boa-fé, pagar a totalidade de suas dívidas de consumo, exigíveis e vincendas, sem comprometer seu mínimo existencial. ${isSuperEndividado ? '✅ CONFIGURADO: o déficit mensal é de ' + fmtCents(Math.abs(Math.min(sobraAposTudo,0))) + '.' : '❌ Não configurado: há sobra mensal de ' + fmtCents(sobraAposTudo) + ' após todas as obrigações.'}`,
+      artigo: 'Lei 14.181/2021 · CDC art. 54-A, §1º'
+    });
+
+    legal.push({
+      icon: '🛡️', cor: '#e8f5e9',
+      titulo: 'Mínimo Existencial — Critério Adotado',
+      texto: `Adotado o critério "${minimo.base}" = ${fmtCents(minimo.valor)}. O Decreto 11.150/2022 (alterado pelo Dec. 11.567/2023) fixou R$ 600,00, mas doutrina e jurisprudência protetiva sustentam parâmetros superiores (salário mínimo ou despesas reais de sobrevivência). O valor preservado representa ${pct(minPct)} da renda líquida.`,
+      artigo: 'CDC art. 104-A · Decreto 11.150/2022'
+    });
+
+    if (r.situacaoIR === 'isento_molestia') {
+      const doenca = MOLESTIAS[document.getElementById('molestiaGrave').value] || 'moléstia grave';
+      legal.push({
+        icon: '🏥', cor: '#e8f5e9',
+        titulo: 'Isenção de IR por Moléstia Grave — ' + doenca,
+        texto: `Portadores de ${doenca.toLowerCase()} que recebam proventos de aposentadoria, reforma ou pensão são isentos de imposto de renda sobre esses rendimentos. A isenção subsiste mesmo com a doença controlada ou em remissão (Súmula 627 STJ) e independe da contemporaneidade dos sintomas (Súmula 598 STJ). Valores retidos indevidamente nos últimos 5 anos são restituíveis com correção pela SELIC — recurso que pode reforçar o plano de pagamento das dívidas.`,
+        artigo: 'Lei 7.713/88, art. 6º, XIV · Súmulas 598 e 627 STJ'
+      });
+    }
+
+    if (r.consignadoPct > 40) {
+      legal.push({
+        icon: '⛔', cor: '#fde8e8',
+        titulo: 'Margem Consignável Estourada — Lei 14.431/2022',
+        texto: `Os descontos consignados (${pct(r.consignadoPct)} da renda líquida) superam o teto legal de 40% (35% empréstimos + 5% cartão consignado). Excesso de ${fmtCents(r.excessoConsignado)}/mês passível de limitação judicial, com devolução ou readequação das parcelas.`,
+        artigo: 'Lei 14.431/2022 · Lei 10.820/2003, art. 1º, §1º'
+      });
+    } else if (r.consignadoPct > 35) {
+      legal.push({
+        icon: '⚠️', cor: '#fffbea',
+        titulo: 'Margem de Empréstimo Consignado no Limite',
+        texto: `Os consignados (${pct(r.consignadoPct)}) excedem os 35% reservados a empréstimos. O excedente só é lícito se corresponder a cartão de crédito consignado (margem extra de 5%). Verificar a composição dos contratos.`,
+        artigo: 'Lei 14.431/2022'
+      });
+    }
+
+    if (r.pensao > 0 || dividas.some(d => d.tipo === 'alimentos')) {
+      legal.push({
+        icon: '👨‍👩‍👧', cor: '#fff8e1',
+        titulo: 'Dívida Alimentar — Tratamento Diferenciado',
+        texto: 'As prestações alimentícias têm preferência absoluta, não se submetem ao plano de pagamento do superendividamento (art. 104-A, §1º, CDC exclui dívidas de caráter alimentar) e podem ensejar prisão civil.',
+        artigo: 'CDC art. 104-A, §1º · CC art. 1.694 · CPC art. 528'
+      });
+    }
+
+    if (dividas.some(d => d.tipo === 'fiscal')) {
+      legal.push({
+        icon: '🏛️', cor: '#fce4ec',
+        titulo: 'Débitos Fiscais — Fora do Plano de Repactuação',
+        texto: 'Dívidas fiscais e tributárias não se submetem ao processo de repactuação do CDC (art. 104-A, §1º). Devem ser tratadas por transação tributária ou parcelamento administrativo próprio.',
+        artigo: 'CDC art. 104-A, §1º · Lei 13.988/2020 (transação tributária)'
+      });
+    }
+
+    if (dividas.some(d => getTipo(d.tipo).protegida || d.tipo === 'financiamento_veiculo')) {
+      legal.push({
+        icon: '🔐', cor: '#ede7f6',
+        titulo: 'Dívidas com Garantia Real — Exclusão Legal do Plano',
+        texto: 'Contratos de financiamento imobiliário e de crédito com garantia real estão excluídos do processo de repactuação (art. 104-A, §1º, CDC). Permanecem exigíveis nos termos contratados, sem prejuízo de revisão de cláusulas abusivas.',
+        artigo: 'CDC art. 104-A, §1º'
+      });
+    }
+
+    if (imovel === 'sim_bem_familia') {
+      legal.push({
+        icon: '🏠', cor: '#e8f5e9',
+        titulo: 'Bem de Família — Impenhorabilidade',
+        texto: 'O imóvel residencial único é impenhorável (ressalvadas exceções legais: alimentos, fiança locatícia, financiamento do próprio imóvel). Não responde pelas dívidas quirografárias do plano.',
+        artigo: 'Lei 8.009/1990 · Súmula 449 STJ'
+      });
+    }
+
+    if (catDevedor === 'consumidor' || catDevedor === 'mei') {
+      legal.push({
+        icon: '⚖️', cor: '#f3e5f5',
+        titulo: 'Repactuação Judicial — Procedimento dos arts. 104-A a 104-C',
+        texto: isSuperEndividado
+          ? 'Cabível o pedido de instauração do processo de repactuação: audiência global de conciliação com todos os credores e, frustrada a conciliação, plano judicial compulsório com prazo máximo de 5 anos, preservado o mínimo existencial.'
+          : 'Não configurado o superendividamento formal; permanece possível a renegociação extrajudicial e medidas preventivas de educação financeira (CDC art. 6º, XI e XII).',
+        artigo: 'CDC arts. 104-A, 104-B e 104-C'
+      });
+    }
+
+    if (execucoes === 'sim') {
+      legal.push({
+        icon: '🔔', cor: '#fce4ec',
+        titulo: 'Execuções em Curso',
+        texto: 'A instauração do processo por superendividamento permite requerer a suspensão de atos executórios sobre a renda do devedor, e a impenhorabilidade salarial (CPC art. 833, IV) protege os vencimentos até 50 SM.',
+        artigo: 'CDC art. 104-A · CPC art. 833, IV',
+      });
+    }
+
+    const ctx = getContexto();
+    if (ctx.genero === 'Feminino' || ctx.violencia === 'Sim') {
+      legal.push({
+        icon: '⚧', cor: '#f3e5f5',
+        titulo: 'Julgamento com Perspectiva de Gênero — Resolução CNJ 492/2023',
+        texto: 'O contexto social da parte deve ser considerado na análise do superendividamento.' +
+          (ctx.violencia === 'Sim' ? ' Havendo registro de violência doméstica/medida protetiva, impõe-se tratamento prioritário e cautela redobrada quanto a dívidas eventualmente contraídas sob coação (Lei 11.340/2006 — Maria da Penha).' : ''),
+        artigo: 'Res. CNJ 492/2023 · Lei 11.340/2006'
+      });
+    }
+    if (ctx.bets === 'Sim') {
+      legal.push({
+        icon: '🎲', cor: '#fff3e0',
+        titulo: 'Dívidas com Apostas (bets) — Aferição da Boa-fé',
+        texto: 'A origem do endividamento em apostas e jogos de azar deve ser examinada à luz da boa-fé (art. 54-A CDC) e do vício de jogo. A publicidade abusiva e a oferta de crédito para apostas (Lei 14.790/2023) podem reforçar a vulnerabilidade do consumidor e a responsabilidade do fornecedor.',
+        artigo: 'CDC art. 54-A · Lei 14.790/2023'
+      });
+    }
+    if (ctx.enfermidade === 'Sim') {
+      legal.push({
+        icon: '🏥', cor: '#e8f5e9',
+        titulo: 'Enfermidade Crônica com Gastos Comprovados',
+        texto: 'Os gastos comprovados com saúde devem ser computados no mínimo existencial, ampliando a parcela de renda impenhorável destinada à manutenção da dignidade e do tratamento do devedor.',
+        artigo: 'CDC art. 104-A · CF art. 1º, III'
+      });
+    }
+
+    document.getElementById('legalItems').innerHTML = legal.map(l => `
+      <div class="legal-item">
+        <div class="legal-icon" style="background:${l.cor}">${l.icon}</div>
+        <div>
+          <h4>${l.titulo}</h4>
+          <p>${l.texto}</p>
+          <div class="artigo">📌 ${l.artigo}</div>
+        </div>
+      </div>
+    `).join('');
+
+    // Recomendações
+    const recs = [];
+
+    if (isSuperEndividado) {
+      recs.push('Ajuizar pedido de instauração do processo de repactuação de dívidas (art. 104-A CDC), instruído com o rol de credores, demonstrativo de renda (cadeia bruta → líquida → efetiva, como acima) e proposta de plano de pagamento em até 5 anos.');
+      recs.push('Reunir documentação: 6 últimos holerites, extratos bancários, contratos de empréstimo, comprovantes das despesas essenciais, certidões e relação de bens.');
+      if (r.consignadoPct > 40) recs.push(`Pleitear liminarmente a limitação dos descontos consignados a 40% da renda (excesso atual de ${fmtCents(r.excessoConsignado)}/mês), com fundamento na Lei 14.431/2022 e na preservação do mínimo existencial.`);
+      recs.push('Requerer, se necessário, a suspensão das cobranças e execuções incidentes sobre a renda durante a tramitação.');
+      if (imovel === 'sim_bem_familia') recs.push('Arguir a impenhorabilidade do bem de família (Lei 8.009/1990) em todas as execuções em curso.');
+    } else if (isLimite) {
+      recs.push('Iniciar renegociação extrajudicial preventiva antes do agravamento — plataformas como o Consumidor.gov.br e mutirões de conciliação dos PROCONs/Tribunais.');
+      recs.push('Avaliar portabilidade de crédito para reduzir juros (prioridade: cartão rotativo e cheque especial, os mais caros).');
+      recs.push('Monitorar a margem consignável antes de novos empréstimos em folha.');
+    } else {
+      recs.push('Situação sob controle. Manter o comprometimento total abaixo de 30% da renda líquida como parâmetro prudencial.');
+      recs.push('Constituir reserva de emergência de 3 a 6 meses de despesas antes de contrair novas dívidas.');
+    }
+
+    if (r.situacaoIR === 'isento_molestia') {
+      recs.push('Requerer administrativamente (e-CAC/RFB) o reconhecimento da isenção de IR por moléstia grave, com laudo médico oficial, e ajuizar repetição de indébito dos valores retidos nos últimos 5 anos (Lei 7.713/88, art. 6º, XIV) — a restituição corrigida pela SELIC pode ser destinada à quitação das dívidas no plano de repactuação.');
+      recs.push('Se a fonte pagadora (INSS ou órgão público) ainda retém IR na folha, requerer a cessação imediata da retenção, o que aumenta a renda líquida mensal disponível.');
+    }
+
+    recs.push('Auditar os contratos em busca de juros abusivos, venda casada, seguros embutidos e tarifas não pactuadas — verbas revisáveis judicialmente (CDC art. 51, IV; Súmulas 539 e 541 STJ).');
+
+    document.getElementById('recomendacoes').innerHTML = recs.map((rec, i) => `
+      <div class="rec-item">
+        <div class="rec-num">${i + 1}</div>
+        <div>${rec}</div>
+      </div>
+    `).join('');
+
+    // Guarda o cálculo para a minuta de petição e preenche o timbre
+    ultimoCalculo = {
+      nome, r, minimo, reservaVital, rendaDisponivel, sobraAposTudo,
+      totalSaldo, parcelasFora, parcelasFolha, comprometimentoMensal,
+      comprometimentoPct, isSuperEndividado, dep, despEssenciais,
+      PRAZO_MAX, parcelaPor60, cap30, cap35, parcelaSugerida, parcelaSugeridaPct,
+      mesesPlano, planoViavel, planoNota, contexto: getContexto(),
+      situacaoProfissional: document.getElementById('situacaoProfissional').value
+    };
+    preencherTimbre();
+
+    document.getElementById('resultado').style.display = 'block';
+    document.getElementById('resultado').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ============================================================
+  // ESCRITÓRIO (timbre) — localStorage
+  // ============================================================
+  let ultimoCalculo = null;
+
+  function abrirModal(id) { document.getElementById(id).classList.add('aberto'); }
+  function fecharModal(id) { document.getElementById(id).classList.remove('aberto'); }
+
+  function getEscritorio() {
+    try { return JSON.parse(localStorage.getItem('escritorio_config')) || {}; }
+    catch { return {}; }
+  }
+
+  function carregarLogo(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = document.getElementById('escLogoPreview');
+      img.src = e.target.result;
+      img.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function salvarEscritorio() {
+    const img = document.getElementById('escLogoPreview');
+    const cfg = {
+      nome: document.getElementById('escNome').value.trim(),
+      advogado: document.getElementById('escAdvogado').value.trim(),
+      oab: document.getElementById('escOAB').value.trim(),
+      contato: document.getElementById('escContato').value.trim(),
+      logo: img.style.display !== 'none' ? img.src : '',
+    };
+    try {
+      localStorage.setItem('escritorio_config', JSON.stringify(cfg));
+    } catch (e) {
+      alert('Não foi possível salvar (a logo pode ser grande demais). Tente uma imagem menor.');
+      return;
+    }
+    preencherTimbre();
+    fecharModal('modalEscritorio');
+  }
+
+  function carregarEscritorioNoModal() {
+    const cfg = getEscritorio();
+    document.getElementById('escNome').value = cfg.nome || '';
+    document.getElementById('escAdvogado').value = cfg.advogado || '';
+    document.getElementById('escOAB').value = cfg.oab || '';
+    document.getElementById('escContato').value = cfg.contato || '';
+    const img = document.getElementById('escLogoPreview');
+    if (cfg.logo) { img.src = cfg.logo; img.style.display = 'block'; }
+  }
+
+  function preencherTimbre() {
+    const cfg = getEscritorio();
+    document.getElementById('phNome').textContent = cfg.nome || 'Análise de Superendividamento';
+    document.getElementById('phSub').textContent =
+      [cfg.advogado, cfg.oab, cfg.contato].filter(Boolean).join(' · ');
+    document.getElementById('phData').textContent =
+      new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+    const logo = document.getElementById('phLogo');
+    if (cfg.logo) { logo.src = cfg.logo; logo.style.display = 'block'; }
+    else logo.style.display = 'none';
+  }
+
+  // ============================================================
+  // CASOS SALVOS — localStorage
+  // ============================================================
+  const CAMPOS_FORMULARIO = [
+    'nome','rendaBruta','descINSS','descPensao','descOutros','descConsignado',
+    'situacaoIR','descIRRF','dependentesIR','molestiaGrave',
+    'anoReferencia','salarioMinimo','dependentes','criterioMinimo',
+    'situacaoProfissional','categoriaDevedor','imovelProprio','patrimonio','execucoes',
+    'ctxGenero','ctxIdade','ctxEscolaridade','ctxDependentes','ctxEnfermidade','ctxViolencia','ctxBets',
+  ].concat(DESPESAS_CATEGORIAS.map(c => despesaInputId(c.key)));
+
+  function getCasos() {
+    try { return JSON.parse(localStorage.getItem('casos_superendividamento')) || []; }
+    catch { return []; }
+  }
+
+  function setCasos(casos) {
+    localStorage.setItem('casos_superendividamento', JSON.stringify(casos));
+  }
+
+  function salvarCaso() {
+    const nomeCaso = document.getElementById('nomeCaso').value.trim()
+      || document.getElementById('nome').value.trim()
+      || 'Caso sem nome';
+    const dados = {};
+    CAMPOS_FORMULARIO.forEach(id => dados[id] = document.getElementById(id).value);
+    const casos = getCasos();
+    const caso = {
+      id: Date.now(),
+      nomeCaso,
+      salvoEm: new Date().toISOString(),
+      dados,
+      dividas: dividas.map(d => ({ credor: d.credor, tipo: d.tipo, saldoCents: d.saldoCents, parcelaCents: d.parcelaCents, emFolha: d.emFolha, parcContratadas: d.parcContratadas, parcPagas: d.parcPagas })),
+    };
+    casos.unshift(caso);
+    setCasos(casos);
+    document.getElementById('nomeCaso').value = '';
+    listarCasos();
+  }
+
+  function carregarCaso(id) {
+    const caso = getCasos().find(c => c.id === id);
+    if (!caso) return;
+    CAMPOS_FORMULARIO.forEach(cid => {
+      const el = document.getElementById(cid);
+      if (el && caso.dados[cid] !== undefined) el.value = caso.dados[cid];
+    });
+    ANO = document.getElementById('anoReferencia').value;
+    P = PARAMETROS_ANUAIS[ANO] || PARAMETROS_ANUAIS['2026'];
+    dividas = [];
+    proximoId = 0;
+    (caso.dividas || []).forEach(d => adicionarDivida(d.credor, d.tipo, d.saldoCents, d.parcelaCents, d.emFolha, d.parcContratadas, d.parcPagas));
+    recalcDespesas();
+    alternarIR();
+    atualizarLabelsAno();
+    fecharModal('modalCasos');
+    document.getElementById('resultado').style.display = 'none';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function excluirCaso(id) {
+    const caso = getCasos().find(c => c.id === id);
+    if (!caso) return;
+    if (!confirm(`Excluir o caso "${caso.nomeCaso}"? Essa ação não pode ser desfeita.`)) return;
+    setCasos(getCasos().filter(c => c.id !== id));
+    listarCasos();
+  }
+
+  function listarCasos() {
+    const lista = document.getElementById('listaCasos');
+    const casos = getCasos();
+    if (casos.length === 0) {
+      lista.innerHTML = '<div style="color:var(--text-muted);font-size:0.87rem">Nenhum caso salvo ainda. Preencha o formulário e clique em "Salvar atual".</div>';
+      return;
+    }
+    lista.innerHTML = casos.map(c => `
+      <div class="caso-item">
+        <div class="caso-info">
+          <div class="caso-nome">${c.nomeCaso}</div>
+          <div class="caso-data">Salvo em ${new Date(c.salvoEm).toLocaleString('pt-BR')} · ${(c.dividas || []).length} dívida(s)</div>
+        </div>
+        <button class="btn btn-primary" onclick="carregarCaso(${c.id})">Abrir</button>
+        <button class="btn btn-outline" style="border-color:var(--danger);color:var(--danger)" onclick="excluirCaso(${c.id})">Excluir</button>
+      </div>
+    `).join('');
+  }
+
+  // ============================================================
+  // MINUTA DE PETIÇÃO — repactuação (art. 104-A CDC)
+  // ============================================================
+  function gerarPeticao() {
+    if (!ultimoCalculo) { alert('Calcule primeiro para gerar a minuta.'); return; }
+    const c = ultimoCalculo;
+    const cfg = getEscritorio();
+    const hoje = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const listaDividas = dividas.map((d, i) => {
+      const t = getTipo(d.tipo);
+      const contr = parseInt(d.parcContratadas) || 0;
+      const pagas = parseInt(d.parcPagas) || 0;
+      const parcInfo = contr > 0
+        ? ` — contratado em ${contr} parcelas, ${pagas} paga(s) e ${Math.max(contr - pagas, 0)} a vencer`
+        : '';
+      return `   ${i + 1}. ${d.credor || 'Credor não identificado'} — ${t.label} — saldo devedor de ${fmtCents(d.saldoCents || 0)}, parcela mensal de ${fmtCents(d.parcelaCents || 0)}${parcInfo}${d.emFolha ? ' (descontada em folha)' : ''};`;
+    }).join('\n');
+
+    // Despesas essenciais discriminadas (compõem o mínimo existencial)
+    const despesasLista = DESPESAS_CATEGORIAS
+      .map(cat => ({ cat, v: parseMoney((document.getElementById(despesaInputId(cat.key)) || {}).value || '') }))
+      .filter(x => x.v > 0)
+      .map(x => `   • ${x.cat.label}: ${fmtCents(x.v)}`)
+      .join('\n');
+
+    // Documentos a juntar (art. 104-A e boa instrução)
+    const ehINSS = ['aposentado'].includes(c.situacaoProfissional);
+    const docs = [
+      'h) cópia do contracheque atualizado, bem como dos últimos 3 (três) meses;',
+      'i) cópia da declaração do imposto de renda do último exercício, a ser mantida sob segredo de justiça;',
+      'j) extratos das contas bancárias sobre as quais recaem os descontos mencionados na inicial, dos 3 (três) últimos meses, além dos 3 (três) meses anteriores ao ajuizamento;',
+      'l) comprovantes das despesas essenciais indicadas na inicial;',
+      (ehINSS ? 'm' : 'm') + ') extrato de margem consignável (tratando-se de aposentado, pensionista ou beneficiário do INSS);',
+      'n) Relatório de Empréstimos e Financiamentos (SCR) obtido junto ao Banco Central do Brasil.',
+    ].join('\n');
+
+    // Contexto social (Res. CNJ 492/2023)
+    const ctx = c.contexto || {};
+    const ctxLinhas = [
+      ctx.genero ? `a) gênero: ${ctx.genero};` : 'a) gênero: _______________;',
+      ctx.idade ? `b) idade: ${ctx.idade} anos;` : 'b) idade: _______________;',
+      ctx.escolaridade ? `c) escolaridade: ${ctx.escolaridade};` : 'c) escolaridade: _______________;',
+      `d) enfermidade crônica com gastos comprovados: ${ctx.enfermidade || '_______________'};`,
+      `e) dependentes: ${ctx.dependentes || '_______________'};`,
+      `f) registro de violência doméstica e/ou medida protetiva: ${ctx.violencia || '_______________'};`,
+      `g) dívidas decorrentes de apostas/jogos de azar ("bets"): ${ctx.bets || '_______________'}.`,
+    ].join('\n');
+
+    const advLinha = [cfg.advogado, cfg.oab].filter(Boolean).join(', ');
+
+    const texto = `EXCELENTÍSSIMO(A) SENHOR(A) DOUTOR(A) JUIZ(A) DE DIREITO DA ___ VARA CÍVEL DA COMARCA DE _______________
+
+${c.nome.toUpperCase()}, [nacionalidade], [estado civil], [profissão], portador(a) do CPF nº _______________, residente e domiciliado(a) em _______________, por seu(sua) advogado(a) que esta subscreve${advLinha ? ' (' + advLinha + ')' : ''}, com escritório profissional em _______________, vem, respeitosamente, à presença de Vossa Excelência, com fundamento nos arts. 104-A a 104-C do Código de Defesa do Consumidor (redação dada pela Lei nº 14.181/2021), propor o presente
+
+PEDIDO DE INSTAURAÇÃO DE PROCESSO DE REPACTUAÇÃO DE DÍVIDAS (SUPERENDIVIDAMENTO)
+
+pelos fatos e fundamentos a seguir expostos.
+
+I — DOS FATOS
+
+O(A) Requerente é consumidor(a) pessoa natural, de boa-fé, que se encontra em situação de superendividamento, impossibilitado(a) de pagar a totalidade de suas dívidas de consumo, exigíveis e vincendas, sem comprometimento do seu mínimo existencial, nos termos do art. 54-A, §1º, do CDC.
+
+[Narrar as circunstâncias que levaram ao superendividamento: desemprego, doença, redução de renda, etc.]
+
+II — DA DEMONSTRAÇÃO ARITMÉTICA DO SUPERENDIVIDAMENTO
+
+A composição da renda mensal do(a) Requerente, conforme documentação anexa, é a seguinte:
+
+   Renda Bruta Mensal: ............................. ${fmtCents(c.r.rendaBruta)}
+   (−) Descontos obrigatórios: ..................... ${fmtCents(c.r.descObrigatorios)}
+   (=) Renda Líquida: ............................... ${fmtCents(c.r.rendaLiquida)}
+   (−) Consignados em folha: ........................ ${fmtCents(c.r.consignado)}
+   (=) Renda Efetivamente Recebida: ................. ${fmtCents(c.r.rendaEfetiva)}
+   (−) Mínimo Existencial (${c.minimo.base}): ${fmtCents(c.reservaVital)}
+   (=) Renda Disponível para Dívidas: ............... ${fmtCents(c.rendaDisponivel)}
+   (−) Parcelas mensais das dívidas: ................ ${fmtCents(c.parcelasFora)}
+   (=) ${c.sobraAposTudo < 0 ? 'DÉFICIT MENSAL: ................................. ' : 'Saldo mensal: .................................... '}${fmtCents(c.sobraAposTudo)}
+
+O comprometimento total da renda líquida alcança ${pct(c.comprometimentoPct)}, evidenciando a impossibilidade manifesta de adimplemento integral sem sacrifício do mínimo existencial.
+
+III — DO MÍNIMO EXISTENCIAL E DAS DESPESAS ESSENCIAIS
+
+A quantia mensal necessária à manutenção digna do(a) Requerente e de sua família — mínimo existencial impenhorável (art. 104-A do CDC) — é de ${fmtCents(c.reservaVital)}, apurada a partir das seguintes despesas essenciais de subsistência:
+
+${despesasLista || '   • [Discriminar as despesas essenciais comprovadas]'}
+
+IV — DO ROL DE CREDORES (art. 104-A, caput, CDC)
+
+O passivo consolidado do(a) Requerente totaliza ${fmtCents(c.totalSaldo)}, assim distribuído:
+
+${listaDividas}
+
+V — DO PLANO DE PAGAMENTO PROPOSTO (art. 104-A, §4º, c/c art. 104-B, §4º, CDC)
+
+Observado o prazo legal máximo de 60 (sessenta) meses e o limite de comprometimento de 30% a 35% da renda líquida — patamar que preserva o mínimo existencial —, o(a) Requerente propõe plano de pagamento nos seguintes termos:
+
+   Passivo total a repactuar: ....................... ${fmtCents(c.totalSaldo)}
+   Prazo proposto: .................................. até ${c.PRAZO_MAX} meses
+   Capacidade de pagamento (30% a 35% da líquida): .. ${fmtCents(c.cap30)} a ${fmtCents(c.cap35)}
+   PARCELA MENSAL SUGERIDA: ......................... ${fmtCents(c.parcelaSugerida)} (${pct(c.parcelaSugeridaPct)} da renda líquida)
+   Prazo estimado de quitação com a parcela sugerida: ${c.mesesPlano === null ? 'inviável sem remição' : c.mesesPlano + ' meses'}
+
+${c.planoViavel
+  ? 'A parcela proposta quita integralmente o passivo dentro do prazo legal, sem sacrifício do mínimo existencial.'
+  : 'Como a capacidade de pagamento, ainda que no teto de 35% e no prazo de 60 meses, é insuficiente para a quitação integral, requer-se a dilação de prazos, a redução dos encargos e/ou a remição parcial do débito, na forma do art. 104-B, §4º, I, do CDC.'}
+
+VI — DO CONTEXTO SOCIAL (Resolução CNJ nº 492/2023 — Julgamento com Perspectiva de Gênero)
+
+Visando à compreensão do contexto social em que inserida a parte superendividada, e em atenção às diretrizes do Protocolo para Julgamento com Perspectiva de Gênero (Res. CNJ nº 492/2023), informa-se:
+
+${ctxLinhas}
+
+VII — DO DIREITO
+
+A Lei nº 14.181/2021 instituiu o processo de repactuação de dívidas, garantindo ao consumidor superendividado audiência conciliatória global com todos os credores (art. 104-A) e, frustrada a conciliação, plano judicial compulsório com prazo máximo de 5 (cinco) anos, preservado o mínimo existencial (art. 104-B).
+
+[Inserir, conforme o caso: excesso de margem consignável (Lei 14.431/2022); isenção de IR por moléstia grave (art. 6º, XIV, Lei 7.713/88); impenhorabilidade do bem de família (Lei 8.009/90); origem do débito em apostas/"bets" (Lei 14.790/2023).]
+
+VIII — DOS PEDIDOS
+
+Ante o exposto, requer:
+
+a) a INSTAURAÇÃO do processo de repactuação de dívidas e o AGENDAMENTO DE AUDIÊNCIA DE CONCILIAÇÃO para apresentação do plano de pagamento a todos os credores, nos termos do art. 104-A da Lei nº 14.181/2021;
+b) a homologação do plano de pagamento proposto, com parcela mensal de ${fmtCents(c.parcelaSugerida)} (${pct(c.parcelaSugeridaPct)} da renda líquida), no prazo de até ${c.PRAZO_MAX} meses, preservado o mínimo existencial de ${fmtCents(c.reservaVital)} mensais;
+c) a citação dos credores para comparecimento à audiência, cientes de que a ausência injustificada acarretará a suspensão da exigibilidade do débito e a interrupção dos encargos da mora (art. 104-A, §2º, CDC);
+d) [se cabível] a concessão de tutela provisória para limitação dos descontos consignados ao teto legal de 40% da remuneração disponível;
+e) a concessão dos benefícios da justiça gratuita, nos termos do art. 98 do CPC, ante a hipossuficiência demonstrada.
+
+IX — DA DOCUMENTAÇÃO A INSTRUIR O FEITO
+
+Além dos documentos já anexados, deverá a parte requerente juntar aos autos, se ainda não apresentados ou se desatualizados:
+
+${docs}
+
+Dá-se à causa o valor de ${fmtCents(c.totalSaldo)}.
+
+Nestes termos,
+pede deferimento.
+
+_______________, ${hoje}.
+
+
+_________________________________
+${advLinha || '[Advogado(a) — OAB]'}`;
+
+    document.getElementById('textoPeticao').value = texto;
+    document.getElementById('peticaoSection').style.display = 'block';
+    document.getElementById('peticaoSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function copiarPeticao() {
+    const ta = document.getElementById('textoPeticao');
+    ta.select();
+    navigator.clipboard.writeText(ta.value).then(() => alert('Minuta copiada para a área de transferência.'));
+  }
+
+  function baixarPeticao() {
+    const blob = new Blob([document.getElementById('textoPeticao').value], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'minuta-repactuacao-' + (ultimoCalculo ? ultimoCalculo.nome.replace(/\s+/g, '-').toLowerCase() : 'caso') + '.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function limpar() {
+    dividas = [];
+    proximoId = 0;
+    renderDividas();
+    document.querySelectorAll('.form-section input[type=text]').forEach(i => i.value = '');
+    document.querySelectorAll('.form-section select').forEach(s => s.selectedIndex = 0);
+    document.getElementById('criterioMinimo').value = 'sm';
+    document.getElementById('resultado').style.display = 'none';
+    document.getElementById('peticaoSection').style.display = 'none';
+    ultimoCalculo = null;
+    recalcDespesas();
+    aplicarAno();
+    alternarIR();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // Inicialização
+  renderDespesas();
+  document.querySelectorAll('input.money').forEach(aplicarMascara);
+  document.getElementById('dependentesIR').addEventListener('change', atualizarCascata);
+  document.getElementById('salarioMinimo').addEventListener('input', atualizarLabelsAno);
+  renderDividas();
+  aplicarAno();
+  alternarIR();
+  recalcDespesas();
+  carregarEscritorioNoModal();
+  preencherTimbre();
+</script>
+</body>
+</html>

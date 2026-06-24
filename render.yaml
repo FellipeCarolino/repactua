@@ -1,0 +1,14 @@
+# Blueprint de deploy no Render (https://render.com).
+# Ao conectar este repositório, o Render lê este arquivo e cria o serviço sozinho.
+services:
+  - type: web
+    name: calculadora-superendividamento
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false   # você define o valor (secreto) no painel do Render
+      - key: PYTHON_VERSION
+        value: "3.12.7"

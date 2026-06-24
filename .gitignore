@@ -1,0 +1,23 @@
+# Segredos — NUNCA versionar a chave de API
+.env
+*.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Config local de preview (não faz parte do produto)
+.claude/
+
+# Documentos de teste (não subir contracheques/contratos reais)
+*.pdf
+*.jpg
+*.jpeg
+*.png
