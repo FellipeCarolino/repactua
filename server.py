@@ -17,6 +17,7 @@ Como rodar:
 """
 
 import base64
+import io
 import json
 import os
 
@@ -25,6 +26,11 @@ import anthropic
 
 MODEL = "claude-opus-4-8"
 MAX_TOKENS = 4096
+
+# A API aceita no máximo 100 páginas por PDF. Contratos escaneados costumam ter
+# o resumo financeiro (valor, parcelas, taxa, CET) nas primeiras páginas, então
+# enviamos só as primeiras MAX_PDF_PAGES — economiza custo e evita o limite.
+MAX_PDF_PAGES = 12
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=None)
@@ -123,6 +129,28 @@ PROMPT_CONTRATO = (
 )
 
 
+def _limitar_paginas_pdf(raw):
+    """Se o PDF tiver muitas páginas, devolve só as primeiras MAX_PDF_PAGES.
+    Mantém o arquivo dentro do limite da API e reduz o custo por documento."""
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError:
+        return raw  # sem pypdf, envia como veio (pode falhar se > 100 páginas)
+    try:
+        reader = PdfReader(io.BytesIO(raw))
+        n = len(reader.pages)
+        if n <= MAX_PDF_PAGES:
+            return raw
+        writer = PdfWriter()
+        for i in range(MAX_PDF_PAGES):
+            writer.add_page(reader.pages[i])
+        buf = io.BytesIO()
+        writer.write(buf)
+        return buf.getvalue()
+    except Exception:
+        return raw
+
+
 def _content_block_for_upload(file_storage):
     """Monta o bloco de conteúdo (documento PDF ou imagem) para a API a partir do upload."""
     raw = file_storage.read()
@@ -134,6 +162,8 @@ def _content_block_for_upload(file_storage):
 
     is_pdf = filename.endswith(".pdf") or "pdf" in mimetype
     if is_pdf:
+        raw = _limitar_paginas_pdf(raw)
+        data = base64.standard_b64encode(raw).decode("utf-8")
         return {
             "type": "document",
             "source": {"type": "base64", "media_type": "application/pdf", "data": data},
