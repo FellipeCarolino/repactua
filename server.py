@@ -276,7 +276,8 @@ def _pagina_auth(titulo, corpo):
 
 
 PAGINA_BASE = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{{TITULO}} · Calculadora de Superendividamento</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{{TITULO}} · Repactua</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
 body{background:linear-gradient(135deg,#1a3a5c,#2c5f8a);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;color:#1c2b3a}
@@ -298,7 +299,14 @@ input:focus{border-color:#2c5f8a;background:#fff}
 .erro{background:#fdecea;color:#7a2218;border:1px solid #e8a49a;border-radius:8px;padding:10px 14px;font-size:.85rem;margin-bottom:14px}
 .ok{background:#e9f7ee;color:#1b5e20;border:1px solid #7ec891;border-radius:8px;padding:10px 14px;font-size:.85rem;margin-bottom:14px}
 </style></head><body><div class="card">
-<div class="top"><div class="logo">⚖️</div><h1>Calculadora de Superendividamento</h1><p>Lei 14.181/2021 · para advogados</p></div>
+<div class="top">
+<svg width="48" height="48" viewBox="0 0 80 80" aria-hidden="true" style="display:block;margin:0 auto 4px">
+<line x1="14" y1="40" x2="33" y2="40" stroke="#e9b53a" stroke-width="7" stroke-linecap="round"/>
+<polyline points="25,30 34,40 25,50" fill="none" stroke="#e9b53a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<line x1="66" y1="40" x2="47" y2="40" stroke="#e9b53a" stroke-width="7" stroke-linecap="round"/>
+<polyline points="55,30 46,40 55,50" fill="none" stroke="#e9b53a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="40" cy="40" r="4" fill="#e9b53a"/></svg>
+<h1>Repactua</h1><p>Análise de superendividamento · para advogados</p></div>
 <div class="body">{{CORPO}}</div></div></body></html>"""
 
 
