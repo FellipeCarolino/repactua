@@ -52,6 +52,16 @@ ASAAS_WEBHOOK_TOKEN = os.environ.get("ASAAS_WEBHOOK_TOKEN", "")
 PLANO_VALOR = float(os.environ.get("PLANO_VALOR", "129.90"))
 PLANO_DESC = "Assinatura Repactua — plano Profissional (50 consultas/mês)"
 
+# --- Nota fiscal automática (NFS-e via Asaas) ---
+NF_AUTO = os.environ.get("NF_AUTO", "0") == "1"
+NF_SERVICO_CODIGO = os.environ.get("NF_SERVICO_CODIGO", "")   # código do serviço municipal
+NF_SERVICO_NOME = os.environ.get("NF_SERVICO_NOME", "")       # descrição do serviço
+NF_ISS = float(os.environ.get("NF_ISS", "0") or 0)            # alíquota de ISS (%)
+NF_RETER_ISS = os.environ.get("NF_RETER_ISS", "0") == "1"
+NF_DEDUCOES = float(os.environ.get("NF_DEDUCOES", "0") or 0)
+NF_OBSERVACOES = os.environ.get("NF_OBSERVACOES", "")
+NF_QUANDO = os.environ.get("NF_QUANDO", "ON_PAYMENT_CONFIRMATION")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -525,6 +535,25 @@ def assinar_post():
             "cycle": "MONTHLY",
             "description": PLANO_DESC,
         })
+        # Configura emissão automática de nota fiscal para a assinatura (se ativado)
+        if NF_AUTO and (NF_SERVICO_CODIGO or NF_SERVICO_NOME):
+            cfg_nf = {
+                "deductions": NF_DEDUCOES,
+                "effectiveDatePeriod": NF_QUANDO,
+                "receivedOnly": True,
+                "observations": NF_OBSERVACOES or PLANO_DESC,
+                "taxes": {"retainIss": NF_RETER_ISS, "iss": NF_ISS,
+                          "cofins": 0, "csll": 0, "inss": 0, "ir": 0, "pis": 0},
+            }
+            if NF_SERVICO_CODIGO:
+                cfg_nf["municipalServiceCode"] = NF_SERVICO_CODIGO
+            if NF_SERVICO_NOME:
+                cfg_nf["municipalServiceName"] = NF_SERVICO_NOME
+            try:
+                asaas("POST", "/subscriptions/%s/invoiceSettings" % assinatura.get("id"), cfg_nf)
+            except Exception:
+                pass  # não bloquear o pagamento se a configuração de NF falhar
+
         pagamentos = asaas("GET", "/subscriptions/%s/payments" % assinatura.get("id"))
         dados = (pagamentos.get("data") or [])
         url_pagamento = dados[0].get("invoiceUrl") if dados else None
