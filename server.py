@@ -503,15 +503,43 @@ def assinar():
     if current_user.status == "ativo":
         return redirect(url_for("index"))
     corpo = f"""<h2>Assinar o Repactua</h2>
-    <div class="sub">Plano Profissional · R$ {('%.2f' % PLANO_VALOR).replace('.', ',')}/mês · 50 consultas de IA por mês.</div>
+    <div class="sub">Plano Profissional · R$ {('%.2f' % PLANO_VALOR).replace('.', ',')}/mês · 50 consultas de IA por mês.<br>Os dados abaixo são usados para a cobrança e a <b>nota fiscal</b>.</div>
     <form method="post">
       <label>Nome / Razão social</label><input name="nome" value="{(current_user.nome or '').replace('"','')}" required>
-      <label>CPF ou CNPJ (do pagador)</label><input name="cpfCnpj" required placeholder="somente números">
+      <label>CPF ou CNPJ</label><input name="cpfCnpj" required placeholder="somente números">
+      <label>Telefone / Celular</label><input name="telefone" placeholder="(DDD) número">
+      <label>CEP</label><input name="cep" id="cep" required placeholder="somente números" maxlength="9">
+      <div style="display:flex;gap:10px">
+        <div style="flex:3"><label>Endereço</label><input name="endereco" id="endereco" required></div>
+        <div style="flex:1"><label>Número</label><input name="numero" required placeholder="nº"></div>
+      </div>
+      <label>Complemento (opcional)</label><input name="complemento" placeholder="sala, andar...">
+      <label>Bairro</label><input name="bairro" id="bairro" required>
+      <div style="display:flex;gap:10px">
+        <div style="flex:3"><label>Cidade</label><input name="cidade" id="cidade" required></div>
+        <div style="flex:1"><label>UF</label><input name="uf" id="uf" required maxlength="2" placeholder="UF"></div>
+      </div>
       <label>E-mail</label><input type="email" value="{current_user.email}" disabled style="opacity:.7">
       <button class="btn" type="submit">Ir para o pagamento →</button>
     </form>
-    <p style="font-size:.8rem;color:#5a6a7a;margin-top:14px">Você escolhe Pix, boleto ou cartão na próxima tela (Asaas). A conta é ativada automaticamente após a confirmação do pagamento.</p>
-    <div class="link"><a href="/">← Voltar</a></div>"""
+    <p style="font-size:.8rem;color:#5a6a7a;margin-top:14px">Você escolhe Pix, boleto ou cartão na próxima tela (Asaas). A conta é ativada automaticamente após a confirmação do pagamento, e a nota fiscal é emitida.</p>
+    <div class="link"><a href="/">← Voltar</a></div>
+    <script>
+      document.getElementById('cep').addEventListener('blur', function() {{
+        var cep = this.value.replace(/\\D/g, '');
+        if (cep.length !== 8) return;
+        fetch('https://viacep.com.br/ws/' + cep + '/json/')
+          .then(function(r) {{ return r.json(); }})
+          .then(function(d) {{
+            if (d.erro) return;
+            if (d.logradouro) document.getElementById('endereco').value = d.logradouro;
+            if (d.bairro) document.getElementById('bairro').value = d.bairro;
+            if (d.localidade) document.getElementById('cidade').value = d.localidade;
+            if (d.uf) document.getElementById('uf').value = d.uf;
+          }})
+          .catch(function() {{}});
+      }});
+    </script>"""
     return _pagina_auth("Assinar", corpo)
 
 
@@ -520,14 +548,28 @@ def assinar():
 def assinar_post():
     nome = (request.form.get("nome") or current_user.nome or current_user.email).strip()
     cpf = "".join(filter(str.isalnum, request.form.get("cpfCnpj") or ""))
+    cep = "".join(filter(str.isdigit, request.form.get("cep") or ""))
+    dados_cliente = {
+        "name": nome,
+        "email": current_user.email,
+        "cpfCnpj": cpf,
+        "mobilePhone": "".join(filter(str.isdigit, request.form.get("telefone") or "")),
+        "postalCode": cep,
+        "address": (request.form.get("endereco") or "").strip(),
+        "addressNumber": (request.form.get("numero") or "").strip(),
+        "complement": (request.form.get("complemento") or "").strip(),
+        "province": (request.form.get("bairro") or "").strip(),
+    }
     try:
         if not current_user.asaas_customer_id:
-            cliente = asaas("POST", "/customers",
-                            {"name": nome, "email": current_user.email, "cpfCnpj": cpf})
+            cliente = asaas("POST", "/customers", dados_cliente)
             current_user.asaas_customer_id = cliente.get("id")
             if nome and not current_user.nome:
                 current_user.nome = nome
             db.session.commit()
+        else:
+            # atualiza os dados (inclui endereço necessário para a nota fiscal)
+            asaas("POST", "/customers/%s" % current_user.asaas_customer_id, dados_cliente)
         assinatura = asaas("POST", "/subscriptions", {
             "customer": current_user.asaas_customer_id,
             "billingType": "UNDEFINED",
@@ -554,8 +596,8 @@ def assinar_post():
                 cfg_nf["municipalServiceName"] = NF_SERVICO_NOME
             try:
                 asaas("POST", "/subscriptions/%s/invoiceSettings" % assinatura.get("id"), cfg_nf)
-            except Exception:
-                pass  # não bloquear o pagamento se a configuração de NF falhar
+            except Exception as e_nf:  # DEBUG TEMPORÁRIO
+                raise RuntimeError("[NF] " + str(e_nf))
 
         pagamentos = asaas("GET", "/subscriptions/%s/payments" % assinatura.get("id"))
         dados = (pagamentos.get("data") or [])
