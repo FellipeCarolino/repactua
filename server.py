@@ -551,8 +551,8 @@ def assinar_post():
                 cfg_nf["municipalServiceName"] = NF_SERVICO_NOME
             try:
                 asaas("POST", "/subscriptions/%s/invoiceSettings" % assinatura.get("id"), cfg_nf)
-            except Exception:
-                pass  # não bloquear o pagamento se a configuração de NF falhar
+            except Exception as e_nf:  # DEBUG TEMPORÁRIO: mostrar o erro da NF
+                raise RuntimeError("[NF] " + str(e_nf))
 
         pagamentos = asaas("GET", "/subscriptions/%s/payments" % assinatura.get("id"))
         dados = (pagamentos.get("data") or [])
