@@ -1058,13 +1058,21 @@ def admin():
     users = User.query.order_by(User.criado_em.desc()).all()
     linhas = ""
     for u in users:
-        plano = (u.org.plano if u.org else "—")
+        org = u.org
+        plano = (org.plano if org else "—")
         papel = u.papel or "dono"
+        if org and plano == "escritorio":
+            extra = (f"<br><small>pool {org.creditos_total}: "
+                     f"{org.cota_distribuida} distrib. · {org.cota_disponivel} livre · "
+                     f"{org.total_membros}/{org.max_membros} acessos</small>")
+        else:
+            extra = ""
+        uso_mes = (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime('%Y-%m') else 0
         linhas += f"""<tr>
           <td>{u.nome or '—'}<br><small>{u.email}</small></td>
-          <td>{u.escritorio or '—'}<br><small>{plano} · {papel}</small></td>
+          <td>{u.escritorio or '—'}<br><small>{plano} · {papel}</small>{extra}</td>
           <td><b>{u.status_efetivo}</b></td>
-          <td>{(u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime('%Y-%m') else 0}/{u.limite_mensal}</td>
+          <td>{uso_mes}/{u.limite_mensal}<br><small>cota pessoal</small></td>
           <td>
             <a href="/admin/status/{u.id}/ativo">ativar</a> ·
             <a href="/admin/status/{u.id}/inativo">inativar</a> ·
