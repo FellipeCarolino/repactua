@@ -21,7 +21,9 @@ import base64
 import io
 import json
 import os
-from datetime import datetime
+import urllib.request
+import urllib.error
+from datetime import datetime, date
 from functools import wraps
 
 from flask import (
@@ -42,6 +44,13 @@ MAX_TOKENS = 4096
 MAX_PDF_PAGES = 12
 
 LIMITE_POR_STATUS = {"ativo": 50, "trial": 3, "inativo": 0}
+
+# --- Pagamento (Asaas) ---
+ASAAS_API_KEY = os.environ.get("ASAAS_API_KEY", "")
+ASAAS_BASE_URL = os.environ.get("ASAAS_BASE_URL", "https://api.asaas.com/v3").rstrip("/")
+ASAAS_WEBHOOK_TOKEN = os.environ.get("ASAAS_WEBHOOK_TOKEN", "")
+PLANO_VALOR = float(os.environ.get("PLANO_VALOR", "129.90"))
+PLANO_DESC = "Assinatura Repactua — plano Profissional (50 consultas/mês)"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -458,24 +467,99 @@ def health():
 
 
 # ============================================================
+# Assinatura (Asaas) — cobrança recorrente
+# ============================================================
+def asaas(method, path, payload=None):
+    """Chamada à API do Asaas. Levanta RuntimeError em caso de erro."""
+    if not ASAAS_API_KEY:
+        raise RuntimeError("Pagamento ainda não configurado (ASAAS_API_KEY ausente).")
+    url = ASAAS_BASE_URL + path
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "access_token": ASAAS_API_KEY, "Content-Type": "application/json", "User-Agent": "Repactua",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        corpo = e.read().decode("utf-8", "ignore")
+        raise RuntimeError(f"Asaas {e.code}: {corpo}")
+
+
+@app.route("/assinar", methods=["GET"])
+@login_required
+def assinar():
+    if current_user.status == "ativo":
+        return redirect(url_for("index"))
+    corpo = f"""<h2>Assinar o Repactua</h2>
+    <div class="sub">Plano Profissional · R$ {('%.2f' % PLANO_VALOR).replace('.', ',')}/mês · 50 consultas de IA por mês.</div>
+    <form method="post">
+      <label>Nome / Razão social</label><input name="nome" value="{(current_user.nome or '').replace('"','')}" required>
+      <label>CPF ou CNPJ (do pagador)</label><input name="cpfCnpj" required placeholder="somente números">
+      <label>E-mail</label><input type="email" value="{current_user.email}" disabled style="opacity:.7">
+      <button class="btn" type="submit">Ir para o pagamento →</button>
+    </form>
+    <p style="font-size:.8rem;color:#5a6a7a;margin-top:14px">Você escolhe Pix, boleto ou cartão na próxima tela (Asaas). A conta é ativada automaticamente após a confirmação do pagamento.</p>
+    <div class="link"><a href="/">← Voltar</a></div>"""
+    return _pagina_auth("Assinar", corpo)
+
+
+@app.route("/assinar", methods=["POST"])
+@login_required
+def assinar_post():
+    nome = (request.form.get("nome") or current_user.nome or current_user.email).strip()
+    cpf = "".join(filter(str.isalnum, request.form.get("cpfCnpj") or ""))
+    try:
+        if not current_user.asaas_customer_id:
+            cliente = asaas("POST", "/customers",
+                            {"name": nome, "email": current_user.email, "cpfCnpj": cpf})
+            current_user.asaas_customer_id = cliente.get("id")
+            if nome and not current_user.nome:
+                current_user.nome = nome
+            db.session.commit()
+        assinatura = asaas("POST", "/subscriptions", {
+            "customer": current_user.asaas_customer_id,
+            "billingType": "UNDEFINED",
+            "value": PLANO_VALOR,
+            "nextDueDate": date.today().isoformat(),
+            "cycle": "MONTHLY",
+            "description": PLANO_DESC,
+        })
+        pagamentos = asaas("GET", "/subscriptions/%s/payments" % assinatura.get("id"))
+        dados = (pagamentos.get("data") or [])
+        url_pagamento = dados[0].get("invoiceUrl") if dados else None
+        if not url_pagamento:
+            raise RuntimeError("Não foi possível obter o link de pagamento.")
+        return redirect(url_pagamento)
+    except Exception as e:  # noqa: BLE001
+        corpo = f"""<h2>Ops, algo deu errado</h2>
+        <div class="erro">{str(e)[:300]}</div>
+        <div class="link"><a href="/assinar">← Tentar de novo</a></div>"""
+        return _pagina_auth("Erro", corpo)
+
+
+# ============================================================
 # Webhook do Asaas (ativa/desativa assinatura conforme pagamento)
 # ============================================================
 @app.route("/api/asaas-webhook", methods=["POST"])
 def asaas_webhook():
-    token_esperado = os.environ.get("ASAAS_WEBHOOK_TOKEN")
-    if token_esperado and request.headers.get("asaas-access-token") != token_esperado:
+    if ASAAS_WEBHOOK_TOKEN and request.headers.get("asaas-access-token") != ASAAS_WEBHOOK_TOKEN:
         return jsonify({"ok": False}), 401
     evento = request.get_json(silent=True) or {}
     tipo = evento.get("event", "")
     pagamento = evento.get("payment", {}) or {}
+    cust_id = pagamento.get("customer")
     email = (pagamento.get("customerEmail") or "").lower()
-    # Fallback: alguns eventos trazem só o customer id
     user = None
-    if email:
+    if cust_id:
+        user = User.query.filter_by(asaas_customer_id=cust_id).first()
+    if not user and email:
         user = User.query.filter_by(email=email).first()
     if user:
         if tipo in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
             user.status = "ativo"
+            if cust_id and not user.asaas_customer_id:
+                user.asaas_customer_id = cust_id
         elif tipo in ("PAYMENT_OVERDUE", "PAYMENT_DELETED", "PAYMENT_REFUNDED", "SUBSCRIPTION_DELETED"):
             user.status = "inativo"
         db.session.commit()
