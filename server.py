@@ -52,6 +52,32 @@ ASAAS_WEBHOOK_TOKEN = os.environ.get("ASAAS_WEBHOOK_TOKEN", "")
 PLANO_VALOR = float(os.environ.get("PLANO_VALOR", "129.90"))
 PLANO_DESC = "Assinatura Repactua — plano Profissional (50 consultas/mês)"
 
+# --- Planos (2 opções) ---
+PLANOS = {
+    "individual": {
+        "nome": "Individual",
+        "valor": float(os.environ.get("PLANO_VALOR_IND", "129.90")),
+        "max_membros": 1,
+        "desc": "Assinatura Repactua — Individual (1 acesso · 50 consultas/mês)",
+        "resumo": "1 acesso · 50 consultas de IA por mês",
+    },
+    "escritorio": {
+        "nome": "Escritório",
+        "valor": float(os.environ.get("PLANO_VALOR_ESC", "229.90")),
+        "max_membros": 5,
+        "desc": "Assinatura Repactua — Escritório (até 5 acessos · 50 consultas/mês por pessoa)",
+        "resumo": "Até 5 acessos · 50 consultas por pessoa/mês",
+    },
+}
+
+
+def valor_cobranca(plano):
+    """Valor a cobrar. PLANO_VALOR (se definido) sobrepõe tudo — usado para testes baratos."""
+    teste = os.environ.get("PLANO_VALOR")
+    if teste:
+        return float(teste)
+    return PLANOS.get(plano, PLANOS["individual"])["valor"]
+
 # --- Nota fiscal automática (NFS-e via Asaas) ---
 NF_AUTO = os.environ.get("NF_AUTO", "0") == "1"
 NF_SERVICO_ID = os.environ.get("NF_SERVICO_ID", "")           # ID do serviço registrado no Asaas
@@ -102,6 +128,29 @@ client = anthropic.Anthropic()  # lê ANTHROPIC_API_KEY do ambiente
 # ============================================================
 # Modelo de dados
 # ============================================================
+class Escritorio(db.Model):
+    """Conta-mãe que assina o plano. Reúne 1 (Individual) ou até 5 (Escritório) usuários."""
+    __tablename__ = "escritorio"
+    id = db.Column(db.Integer, primary_key=True)
+    nome = db.Column(db.String(255))
+    plano = db.Column(db.String(20), default="individual")  # individual | escritorio
+    status = db.Column(db.String(20), default="trial")      # trial | ativo | inativo
+    asaas_customer_id = db.Column(db.String(120))
+    max_membros = db.Column(db.Integer, default=1)
+    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+
+    usuarios = db.relationship("User", backref="org", lazy=True,
+                               foreign_keys="User.org_id")
+
+    @property
+    def total_membros(self):
+        return len(self.usuarios or [])
+
+    @property
+    def vagas_restantes(self):
+        return max((self.max_membros or 1) - self.total_membros, 0)
+
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
@@ -109,12 +158,14 @@ class User(UserMixin, db.Model):
     nome = db.Column(db.String(255))
     escritorio = db.Column(db.String(255))
     oab = db.Column(db.String(60))
-    status = db.Column(db.String(20), default="trial")  # trial | ativo | inativo
+    status = db.Column(db.String(20), default="trial")  # legado — fonte de verdade é o Escritório
     is_admin = db.Column(db.Boolean, default=False)
     usage_mes = db.Column(db.String(7))   # "AAAA-MM"
     usage_contagem = db.Column(db.Integer, default=0)
-    asaas_customer_id = db.Column(db.String(120))
+    asaas_customer_id = db.Column(db.String(120))  # legado — migrado para o Escritório
     criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+    org_id = db.Column(db.Integer, db.ForeignKey("escritorio.id"))
+    papel = db.Column(db.String(20), default="dono")  # dono | membro
 
     def set_senha(self, senha):
         self.senha_hash = generate_password_hash(senha, method="pbkdf2:sha256")
@@ -123,8 +174,15 @@ class User(UserMixin, db.Model):
         return check_password_hash(self.senha_hash, senha)
 
     @property
+    def status_efetivo(self):
+        """Status que vale para o usuário = status do escritório (fallback no legado)."""
+        if self.org:
+            return self.org.status
+        return self.status or "trial"
+
+    @property
     def limite_mensal(self):
-        return LIMITE_POR_STATUS.get(self.status, 0)
+        return LIMITE_POR_STATUS.get(self.status_efetivo, 0)
 
     def _mes_atual(self):
         return datetime.utcnow().strftime("%Y-%m")
@@ -135,7 +193,7 @@ class User(UserMixin, db.Model):
         return max(self.limite_mensal - (self.usage_contagem or 0), 0)
 
     def pode_consultar(self):
-        return self.status in ("trial", "ativo") and self.consultas_restantes() > 0
+        return self.status_efetivo in ("trial", "ativo") and self.consultas_restantes() > 0
 
     def registrar_consulta(self):
         mes = self._mes_atual()
@@ -151,8 +209,42 @@ def load_user(user_id):
     return db.session.get(User, int(user_id))
 
 
-with app.app_context():
+def _migrar_schema():
+    """Cria tabelas e adiciona colunas novas (produção tem tabela 'user' antiga)."""
+    from sqlalchemy import text
     db.create_all()
+    for ddl in (
+        'ALTER TABLE "user" ADD COLUMN org_id INTEGER',
+        'ALTER TABLE "user" ADD COLUMN papel VARCHAR(20)',
+    ):
+        try:
+            db.session.execute(text(ddl))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    # Cada usuário ainda sem escritório vira dono de um escritório Individual
+    try:
+        orfaos = User.query.filter((User.org_id.is_(None))).all()
+        for u in orfaos:
+            org = Escritorio(
+                nome=(u.escritorio or u.nome or u.email),
+                plano="individual",
+                status=(u.status or "trial"),
+                asaas_customer_id=u.asaas_customer_id,
+                max_membros=1,
+            )
+            db.session.add(org)
+            db.session.flush()
+            u.org_id = org.id
+            u.papel = "dono"
+        if orfaos:
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+with app.app_context():
+    _migrar_schema()
 
 
 # ============================================================
@@ -281,7 +373,7 @@ def _extrair(prompt, schema, file_storage):
 
 def _checar_uso():
     """Retorna (ok, mensagem_erro_ou_None) para uso da IA pelo usuário atual."""
-    if current_user.status == "inativo":
+    if current_user.status_efetivo == "inativo":
         return False, "Sua assinatura está inativa. Regularize o pagamento para usar a leitura por IA."
     if current_user.consultas_restantes() <= 0:
         return False, f"Você atingiu o limite de {current_user.limite_mensal} consultas neste mês."
@@ -318,6 +410,13 @@ input:focus{border-color:#2c5f8a;background:#fff}
 .link a{color:#2c5f8a;font-weight:600;text-decoration:none}
 .erro{background:#fdecea;color:#7a2218;border:1px solid #e8a49a;border-radius:8px;padding:10px 14px;font-size:.85rem;margin-bottom:14px}
 .ok{background:#e9f7ee;color:#1b5e20;border:1px solid #7ec891;border-radius:8px;padding:10px 14px;font-size:.85rem;margin-bottom:14px}
+.planos{display:flex;gap:10px;margin-top:6px}
+.plano{flex:1;border:1.5px solid #d0d7e2;border-radius:10px;padding:12px;cursor:pointer;background:#fafbfd;text-transform:none;letter-spacing:0;margin:0;display:block}
+.plano.sel{border-color:#c8960c;background:#fffaf0;box-shadow:0 0 0 2px rgba(200,150,12,.15)}
+.plano input{display:none}
+.plano b{display:block;color:#1a3a5c;font-size:.95rem}
+.plano span{display:block;color:#c8960c;font-weight:700;font-size:1rem;margin:2px 0}
+.plano small{display:block;color:#5a6a7a;font-size:.72rem;line-height:1.3}
 </style></head><body><div class="card">
 <div class="top">
 <svg width="48" height="48" viewBox="0 0 80 80" aria-hidden="true" style="display:block;margin:0 auto 4px">
@@ -380,11 +479,16 @@ def pagina_signup():
         elif User.query.filter_by(email=email).first():
             msg = '<div class="erro">Já existe uma conta com este e-mail.</div>'
         else:
-            user = User(email=email, nome=nome, escritorio=escritorio, status="trial")
+            status_inicial = "ativo" if email == ADMIN_EMAIL else "trial"
+            org = Escritorio(nome=(escritorio or nome or email), plano="individual",
+                             status=status_inicial, max_membros=1)
+            db.session.add(org)
+            db.session.flush()
+            user = User(email=email, nome=nome, escritorio=escritorio, status=status_inicial,
+                        org_id=org.id, papel="dono")
             user.set_senha(senha)
             if email == ADMIN_EMAIL:
                 user.is_admin = True
-                user.status = "ativo"
             db.session.add(user)
             db.session.commit()
             login_user(user, remember=True)
@@ -420,11 +524,18 @@ def index():
 @app.route("/api/me")
 @login_required
 def api_me():
+    org = current_user.org
+    plano = (org.plano if org else "individual")
     return jsonify({
         "nome": current_user.nome, "email": current_user.email,
-        "status": current_user.status, "is_admin": current_user.is_admin,
+        "status": current_user.status_efetivo, "is_admin": current_user.is_admin,
         "limite": current_user.limite_mensal,
         "restantes": current_user.consultas_restantes(),
+        "plano": plano,
+        "plano_nome": PLANOS.get(plano, {}).get("nome", "Individual"),
+        "papel": current_user.papel or "dono",
+        "membros": (org.total_membros if org else 1),
+        "max_membros": (org.max_membros if org else 1),
     })
 
 
@@ -500,11 +611,25 @@ def asaas(method, path, payload=None):
 @app.route("/assinar", methods=["GET"])
 @login_required
 def assinar():
-    if current_user.status == "ativo":
+    if current_user.status_efetivo == "ativo":
         return redirect(url_for("index"))
+    ind, esc = PLANOS["individual"], PLANOS["escritorio"]
+    pv_ind = ('%.2f' % ind["valor"]).replace('.', ',')
+    pv_esc = ('%.2f' % esc["valor"]).replace('.', ',')
     corpo = f"""<h2>Assinar o Repactua</h2>
-    <div class="sub">Plano Profissional · R$ {('%.2f' % PLANO_VALOR).replace('.', ',')}/mês · 50 consultas de IA por mês.<br>Os dados abaixo são usados para a cobrança e a <b>nota fiscal</b>.</div>
+    <div class="sub">Escolha seu plano. A conta é ativada automaticamente após o pagamento, e a <b>nota fiscal</b> é emitida.</div>
     <form method="post">
+      <label>Plano</label>
+      <div class="planos">
+        <label class="plano sel">
+          <input type="radio" name="plano" value="individual" checked>
+          <div><b>Individual</b><span>R$ {pv_ind}/mês</span><small>{ind['resumo']}</small></div>
+        </label>
+        <label class="plano">
+          <input type="radio" name="plano" value="escritorio">
+          <div><b>Escritório</b><span>R$ {pv_esc}/mês</span><small>{esc['resumo']}</small></div>
+        </label>
+      </div>
       <label>Nome / Razão social</label><input name="nome" value="{(current_user.nome or '').replace('"','')}" required>
       <label>CPF ou CNPJ</label><input name="cpfCnpj" required placeholder="somente números">
       <label>Telefone / Celular</label><input name="telefone" placeholder="(DDD) número">
@@ -539,6 +664,12 @@ def assinar():
           }})
           .catch(function() {{}});
       }});
+      document.querySelectorAll('.plano input').forEach(function(r) {{
+        r.addEventListener('change', function() {{
+          document.querySelectorAll('.plano').forEach(function(p) {{ p.classList.remove('sel'); }});
+          this.closest('.plano').classList.add('sel');
+        }});
+      }});
     </script>"""
     return _pagina_auth("Assinar", corpo)
 
@@ -549,6 +680,18 @@ def assinar_post():
     nome = (request.form.get("nome") or current_user.nome or current_user.email).strip()
     cpf = "".join(filter(str.isalnum, request.form.get("cpfCnpj") or ""))
     cep = "".join(filter(str.isdigit, request.form.get("cep") or ""))
+    plano = request.form.get("plano")
+    if plano not in PLANOS:
+        plano = "individual"
+    org = current_user.org
+    if org is None:  # segurança: garante um escritório
+        org = Escritorio(nome=(nome or current_user.email), plano="individual",
+                         status="trial", max_membros=1)
+        db.session.add(org)
+        db.session.flush()
+        current_user.org_id = org.id
+        current_user.papel = "dono"
+        db.session.commit()
     dados_cliente = {
         "name": nome,
         "email": current_user.email,
@@ -561,28 +704,32 @@ def assinar_post():
         "province": (request.form.get("bairro") or "").strip(),
     }
     try:
-        if not current_user.asaas_customer_id:
+        if not org.asaas_customer_id:
             cliente = asaas("POST", "/customers", dados_cliente)
-            current_user.asaas_customer_id = cliente.get("id")
+            org.asaas_customer_id = cliente.get("id")
             if nome and not current_user.nome:
                 current_user.nome = nome
             db.session.commit()
         else:
             # atualiza os dados (inclui endereço necessário para a nota fiscal)
             try:
-                asaas("POST", "/customers/%s" % current_user.asaas_customer_id, dados_cliente)
+                asaas("POST", "/customers/%s" % org.asaas_customer_id, dados_cliente)
             except Exception:
                 # cliente pode ter sido excluído no Asaas — cria um novo
                 cliente = asaas("POST", "/customers", dados_cliente)
-                current_user.asaas_customer_id = cliente.get("id")
+                org.asaas_customer_id = cliente.get("id")
                 db.session.commit()
+        # registra o plano escolhido no escritório
+        org.plano = plano
+        org.max_membros = PLANOS[plano]["max_membros"]
+        db.session.commit()
         assinatura = asaas("POST", "/subscriptions", {
-            "customer": current_user.asaas_customer_id,
+            "customer": org.asaas_customer_id,
             "billingType": "UNDEFINED",
-            "value": PLANO_VALOR,
+            "value": valor_cobranca(plano),
             "nextDueDate": date.today().isoformat(),
             "cycle": "MONTHLY",
-            "description": PLANO_DESC,
+            "description": PLANOS[plano]["desc"],
         })
         # Configura emissão automática de nota fiscal para a assinatura (se ativado)
         if NF_AUTO and (NF_SERVICO_ID or NF_SERVICO_CODIGO or NF_SERVICO_NOME):
@@ -590,7 +737,7 @@ def assinar_post():
                 "deductions": NF_DEDUCOES,
                 "effectiveDatePeriod": NF_QUANDO,
                 "receivedOnly": True,
-                "observations": NF_OBSERVACOES or PLANO_DESC,
+                "observations": NF_OBSERVACOES or PLANOS[plano]["desc"],
                 "taxes": {"retainIss": NF_RETER_ISS, "iss": NF_ISS,
                           "cofins": 0, "csll": 0, "inss": 0, "ir": 0, "pis": 0},
             }
@@ -630,18 +777,19 @@ def asaas_webhook():
     pagamento = evento.get("payment", {}) or {}
     cust_id = pagamento.get("customer")
     email = (pagamento.get("customerEmail") or "").lower()
-    user = None
+    org = None
     if cust_id:
-        user = User.query.filter_by(asaas_customer_id=cust_id).first()
-    if not user and email:
-        user = User.query.filter_by(email=email).first()
-    if user:
+        org = Escritorio.query.filter_by(asaas_customer_id=cust_id).first()
+    if not org and email:
+        u = User.query.filter_by(email=email).first()
+        org = u.org if u else None
+    if org:
         if tipo in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
-            user.status = "ativo"
-            if cust_id and not user.asaas_customer_id:
-                user.asaas_customer_id = cust_id
+            org.status = "ativo"
+            if cust_id and not org.asaas_customer_id:
+                org.asaas_customer_id = cust_id
         elif tipo in ("PAYMENT_OVERDUE", "PAYMENT_DELETED", "PAYMENT_REFUNDED", "SUBSCRIPTION_DELETED"):
-            user.status = "inativo"
+            org.status = "inativo"
         db.session.commit()
     return jsonify({"ok": True})
 
@@ -657,10 +805,12 @@ def admin():
     users = User.query.order_by(User.criado_em.desc()).all()
     linhas = ""
     for u in users:
+        plano = (u.org.plano if u.org else "—")
+        papel = u.papel or "dono"
         linhas += f"""<tr>
           <td>{u.nome or '—'}<br><small>{u.email}</small></td>
-          <td>{u.escritorio or '—'}</td>
-          <td><b>{u.status}</b></td>
+          <td>{u.escritorio or '—'}<br><small>{plano} · {papel}</small></td>
+          <td><b>{u.status_efetivo}</b></td>
           <td>{(u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime('%Y-%m') else 0}/{u.limite_mensal}</td>
           <td>
             <a href="/admin/status/{u.id}/ativo">ativar</a> ·
@@ -688,7 +838,9 @@ def admin_status(uid, novo):
         return redirect(url_for("index"))
     u = db.session.get(User, uid)
     if u:
-        u.status = novo
+        u.status = novo            # legado
+        if u.org:
+            u.org.status = novo    # fonte de verdade
         db.session.commit()
     return redirect(url_for("admin"))
 
