@@ -788,17 +788,24 @@
       resize: vertical;
     }
 
+    @page { size: A4; margin: 14mm 12mm; }
     @media print {
+      * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       #printHeader { display: block !important; }
-      .peticao-section { display: none; }
+      #contaBar, header, .actions, .form-section, .peticao-section,
       .modal-overlay { display: none !important; }
-      header { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-      .actions, .form-section { display: none !important; }
       #resultado { display: block !important; }
       body { background: white; }
       .card, .resultado-hero, .metric-card, .comprometimento-section,
       .dividas-section, .legal-section, .rec-section, .demonstrativo { box-shadow: none !important; }
+      .resultado-hero, .demonstrativo, .comprometimento-section, .dividas-section,
+      .legal-section, .rec-section, .metric-card, .nota-rodape,
+      table, tr, .print-footer { page-break-inside: avoid; }
+      h3 { page-break-after: avoid; }
+      .print-footer { display: block !important; }
     }
+    .print-footer { display: none; text-align: center; font-size: 0.72rem;
+      color: #5a6a7a; margin-top: 22px; padding-top: 12px; border-top: 1px solid #e0e5ec; }
 
     .subtotal-row td { font-weight: 700; background: #f8f9fc; }
 
@@ -1302,6 +1309,7 @@
         <div class="ph-data">
           Relatório de Análise de Superendividamento<br>
           <span id="phData"></span>
+          <div id="phCliente" style="margin-top:4px;font-weight:600;color:#1a3a5c"></div>
         </div>
       </div>
     </div>
@@ -1457,7 +1465,7 @@
     </div>
 
     <div class="actions">
-      <button class="btn btn-accent btn-lg" onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>
+      <button class="btn btn-accent btn-lg" onclick="imprimirRelatorio()">🖨️ Imprimir / Salvar PDF</button>
       <button class="btn btn-primary btn-lg" onclick="gerarPeticao()">📄 Gerar Minuta de Petição</button>
       <button class="btn btn-outline btn-lg" onclick="document.getElementById('nomeCaso').value=''; abrirModal('modalCasos'); listarCasos()">💾 Salvar Caso</button>
       <button class="btn btn-outline btn-lg" onclick="limpar()">🔄 Nova Consulta</button>
@@ -1467,6 +1475,7 @@
       Esta calculadora é uma ferramenta de apoio jurídico-financeiro. Os resultados não substituem análise jurídica profissional individualizada.<br>
       Referências: Lei nº 14.181/2021 · CDC arts. 54-A a 54-G e 104-A a 104-C · Decreto 11.150/2022 (Dec. 11.567/2023) · Lei 14.431/2022 (margem consignável 35%+5%) · Lei 15.270/2025 (isenção IR até R$ 5.000) · Lei 8.009/1990 · Parâmetros conforme o ano de referência selecionado
     </p>
+    <div class="print-footer" id="printFooter">Relatório gerado pela plataforma <b>Repactua</b> · análise de superendividamento · repactua.com.br</div>
   </div>
 </main>
 
@@ -2707,6 +2716,14 @@
     const logo = document.getElementById('phLogo');
     if (cfg.logo) { logo.src = cfg.logo; logo.style.display = 'block'; }
     else logo.style.display = 'none';
+  }
+
+  function imprimirRelatorio() {
+    preencherTimbre();
+    const nome = (document.getElementById('nome').value || '').trim();
+    const ph = document.getElementById('phCliente');
+    if (ph) ph.textContent = nome ? 'Interessado(a): ' + nome : '';
+    window.print();
   }
 
   // ============================================================
