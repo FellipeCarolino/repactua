@@ -574,7 +574,80 @@ def pagina_logout():
 def index():
     if not current_user.is_authenticated:
         return send_from_directory(BASE_DIR, "landing.html")
+    return render_home()
+
+
+@app.route("/calculadora")
+@login_required
+def calculadora():
     return send_from_directory(BASE_DIR, "index.html")
+
+
+def render_home():
+    u = current_user
+    org = u.org
+    plano = org.plano if org else "individual"
+    plano_nome = PLANOS.get(plano, {}).get("nome", "Individual")
+    usados = (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime("%Y-%m") else 0
+    cota = u.limite_mensal or 0
+    pct = int(usados * 100 / cota) if cota else 0
+    primeiro_nome = (u.nome or u.email or "").split(" ")[0].split("@")[0]
+
+    # casos recentes do escritório
+    q = Caso.query
+    q = q.filter_by(org_id=u.org_id) if u.org_id else q.filter_by(user_id=u.id)
+    recentes = q.order_by(Caso.atualizado_em.desc()).limit(5).all()
+    if recentes:
+        itens = ""
+        for c in recentes:
+            quando = (c.atualizado_em or c.criado_em or datetime.utcnow()).strftime("%d/%m/%Y")
+            itens += (f'<a class="recente" href="/calculadora?caso={c.id}">'
+                      f'<span class="r-nome">{(c.nome or "Caso sem nome")}</span>'
+                      f'<span class="r-data">{quando}</span></a>')
+        bloco_recentes = f'<div class="card"><h2>Casos recentes</h2>{itens}'\
+                         f'<a class="vertodos" href="/calculadora?casos=1">Ver todos os casos →</a></div>'
+    else:
+        bloco_recentes = ('<div class="card"><h2>Casos recentes</h2>'
+                          '<div class="vazio">Você ainda não salvou nenhum caso. Comece uma nova análise!</div></div>')
+
+    card_equipe = ""
+    if u.papel == "dono" and plano == "escritorio":
+        card_equipe = ('<a class="atalho" href="/conta">'
+                       '<div class="a-ico">👥</div><div class="a-nome">Equipe</div>'
+                       '<div class="a-sub">Gerir membros e créditos</div></a>')
+
+    corpo = f"""<div class="topo">
+      <div class="marca">{logo_repactua(34)} <div>Repactua<small>Olá, {primeiro_nome}</small></div></div>
+      <div class="links"><a href="/conta">Minha conta</a>{' · <a href="/admin">Admin</a>' if u.is_admin else ''} · <a href="/logout">Sair</a></div>
+    </div>
+
+    <div class="card uso">
+      <div class="uso-top">
+        <span class="badge-plano">{plano_nome}</span>
+        <span class="uso-num">{usados} de {cota} consultas usadas este mês</span>
+      </div>
+      <div class="bar"><i style="width:{min(pct,100)}%"></i></div>
+      {'' if u.status_efetivo == 'ativo' else '<a class="assinar" href="/assinar">Assinar para liberar →</a>'}
+    </div>
+
+    <div class="atalhos">
+      <a class="atalho destaque" href="/calculadora">
+        <div class="a-ico">🧮</div><div class="a-nome">Nova análise</div>
+        <div class="a-sub">Calcular superendividamento</div>
+      </a>
+      <a class="atalho" href="/calculadora?casos=1">
+        <div class="a-ico">🗂️</div><div class="a-nome">Meus casos</div>
+        <div class="a-sub">Abrir análises salvas</div>
+      </a>
+      <a class="atalho" href="/conta">
+        <div class="a-ico">⚙️</div><div class="a-nome">Minha conta</div>
+        <div class="a-sub">Plano, senha e dados</div>
+      </a>
+      {card_equipe}
+    </div>
+
+    {bloco_recentes}"""
+    return Response(PAGINA_HOME.replace("{{CORPO}}", corpo), mimetype="text/html")
 
 
 @app.route("/api/me")
@@ -953,6 +1026,44 @@ input[type=text],input[type=email],input[type=password],input[type=number]{paddi
 </style></head><body><div class="wrap">{{CORPO}}</div></body></html>"""
 
 
+PAGINA_HOME = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Início · Repactua</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+body{background:#f4f6f9;color:#1c2b3a;padding:24px}
+.wrap{max-width:760px;margin:0 auto}
+.topo{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+.marca{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.15rem;color:#1a3a5c}
+.marca small{display:block;font-weight:400;color:#5a6a7a;font-size:.82rem}
+.links a{color:#2c5f8a;text-decoration:none;font-size:.88rem;font-weight:600}
+.links a:hover{color:#c8960c}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:20px;margin-bottom:16px}
+.card h2{font-size:1rem;color:#1a3a5c;margin-bottom:12px}
+.uso-top{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}
+.badge-plano{background:#c8960c;color:#13283e;padding:3px 12px;border-radius:14px;font-weight:700;font-size:.8rem}
+.uso-num{color:#5a6a7a;font-size:.9rem}
+.bar{height:12px;background:#eef1f5;border-radius:8px;overflow:hidden;margin-top:10px}
+.bar>i{display:block;height:100%;background:#c8960c;border-radius:8px}
+.assinar{display:inline-block;margin-top:12px;background:#c8960c;color:#fff;padding:8px 16px;border-radius:8px;text-decoration:none;font-weight:700;font-size:.88rem}
+.atalhos{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-bottom:16px}
+.atalho{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:18px;text-decoration:none;color:#1c2b3a;border:1.5px solid transparent}
+.atalho:hover{border-color:#c8960c}
+.atalho.destaque{background:#1a3a5c;color:#fff}
+.a-ico{font-size:1.7rem;line-height:1}
+.a-nome{font-weight:700;margin-top:8px}
+.atalho.destaque .a-sub{color:rgba(255,255,255,.8)}
+.a-sub{font-size:.78rem;color:#5a6a7a;margin-top:2px}
+.recente{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #f0f3f7;text-decoration:none;color:#1c2b3a}
+.recente:last-of-type{border-bottom:none}
+.recente:hover .r-nome{color:#c8960c}
+.r-nome{font-weight:600;font-size:.9rem}
+.r-data{color:#8a97a5;font-size:.82rem}
+.vertodos{display:inline-block;margin-top:12px;color:#2c5f8a;text-decoration:none;font-weight:600;font-size:.85rem}
+.vazio{color:#5a6a7a;font-size:.88rem}
+</style></head><body><div class="wrap">{{CORPO}}</div></body></html>"""
+
+
 def _badge(status):
     cls = {"ativo": "b-ativo", "trial": "b-trial", "inativo": "b-inativo"}.get(status, "b-trial")
     return f'<span class="badge {cls}">{status.upper()}</span>'
@@ -1038,7 +1149,7 @@ def render_conta(msg_ok="", msg_erro=""):
 
     corpo = f"""<div class="topo">
       <h1>{logo_repactua(30)} <span>Minha Conta</span></h1>
-      <div><a href="/">← Calculadora</a>{' · <a href="/admin">Admin</a>' if u.is_admin else ''} · <a href="/logout">Sair</a></div>
+      <div><a href="/calculadora">← Calculadora</a>{' · <a href="/admin">Admin</a>' if u.is_admin else ''} · <a href="/logout">Sair</a></div>
     </div>
     {avisos}{bloco_plano}{bloco_equipe}{bloco_senha}"""
     return Response(PAGINA_CONTA.replace("{{CORPO}}", corpo), mimetype="text/html")
@@ -1260,7 +1371,7 @@ def admin():
     small{{color:#8a97a5;font-weight:400}}</style></head><body>
     <div class="barra">
       <div class="marca">{logo_repactua(30)} <div>Repactua<small>Painel administrativo</small></div></div>
-      <div><a href="/">← Calculadora</a><a href="/admin/logout">Sair do admin ↪</a></div>
+      <div><a href="/calculadora">← Calculadora</a><a href="/admin/logout">Sair do admin ↪</a></div>
     </div>
     <div class="wrap">
       <h1>Assinantes</h1>

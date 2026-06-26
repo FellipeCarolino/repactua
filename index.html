@@ -825,6 +825,7 @@
   <span id="contaUso" style="background:rgba(255,255,255,0.12);padding:4px 12px;border-radius:14px"></span>
   <a id="contaAssinar" href="/assinar" style="background:#c8960c;color:#fff;text-decoration:none;font-weight:700;padding:5px 16px;border-radius:14px;display:none">Assinar</a>
   <span id="contaNome"></span>
+  <a href="/" style="color:#fff;text-decoration:none;opacity:0.9;font-weight:600">Início</a>
   <a href="/conta" style="color:#fff;text-decoration:none;opacity:0.9;font-weight:600">Minha conta</a>
   <a id="contaAdmin" href="/admin" style="color:#f0b429;text-decoration:none;font-weight:600;display:none">Admin</a>
   <a href="/logout" style="color:#fff;text-decoration:none;opacity:0.85">Sair ↪</a>
@@ -3061,6 +3062,18 @@ ${advLinha || '[Advogado(a) — OAB]'}`;
   recalcDespesas();
   carregarEscritorioNoModal();
   carregarTimbreServidor();
+
+  // Atalhos vindos da home: ?casos=1 abre os casos; ?caso=ID abre um caso direto
+  (async function abrirPorURL() {
+    const p = new URLSearchParams(location.search);
+    if (p.get('casos') === '1') {
+      abrirModal('modalCasos');
+      await listarCasos();
+    } else if (p.get('caso')) {
+      await listarCasos();
+      carregarCaso(parseInt(p.get('caso'), 10));
+    }
+  })();
 </script>
 </body>
 </html>
