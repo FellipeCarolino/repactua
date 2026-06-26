@@ -27,7 +27,7 @@ from datetime import datetime, date
 from functools import wraps
 
 from flask import (
-    Flask, request, jsonify, send_from_directory, redirect, url_for, Response
+    Flask, request, jsonify, send_from_directory, redirect, url_for, Response, session
 )
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
@@ -1048,13 +1048,49 @@ def asaas_webhook():
 
 
 # ============================================================
-# Admin (gestão simples de assinantes)
+# Admin (gestão simples de assinantes) — login próprio, separado do app
 # ============================================================
+def _admin_logado():
+    """Admin via sessão própria (login separado) OU usuário logado que é admin."""
+    if session.get("admin_ok"):
+        return True
+    return current_user.is_authenticated and current_user.is_admin
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    erro = ""
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        senha = request.form.get("senha") or ""
+        u = User.query.filter_by(email=email).first()
+        if u and u.is_admin and u.conferir_senha(senha):
+            session["admin_ok"] = True
+            session["admin_email"] = email
+            return redirect(url_for("admin"))
+        erro = '<div class="erro">Credenciais inválidas ou conta sem permissão de admin.</div>'
+    corpo = f"""<h2>Painel Administrativo</h2>
+    <div class="sub">Acesso restrito — gestão Repactua.</div>{erro}
+    <form method="post">
+      <label>E-mail de admin</label><input type="email" name="email" required>
+      <label>Senha</label><input type="password" name="senha" required>
+      <button class="btn" type="submit">Entrar no painel</button>
+    </form>
+    <div class="link"><a href="/">← Ir para o site</a></div>"""
+    return _pagina_auth("Admin", corpo)
+
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("admin_ok", None)
+    session.pop("admin_email", None)
+    return redirect(url_for("admin_login"))
+
+
 @app.route("/admin")
-@login_required
 def admin():
-    if not current_user.is_admin:
-        return redirect(url_for("index"))
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
     users = User.query.order_by(User.criado_em.desc()).all()
     linhas = ""
     for u in users:
@@ -1087,7 +1123,8 @@ def admin():
     th{{background:#1a3a5c;color:#fff;padding:10px;text-align:left;font-size:.8rem}} td{{padding:10px;border-bottom:1px solid #eee;font-size:.9rem}}
     a{{color:#2c5f8a;text-decoration:none;font-size:.82rem}} small{{color:#888}}
     .voltar{{display:inline-block;margin-bottom:12px;color:#2c5f8a;text-decoration:none}}</style></head><body>
-    <a class="voltar" href="/">← Voltar à calculadora</a>
+    <a class="voltar" href="/">← Voltar à calculadora</a> &nbsp;·&nbsp;
+    <a class="voltar" href="/admin/logout">Sair do admin ↪</a>
     <h1>Assinantes ({len(users)})</h1>
     <table><thead><tr><th>Advogado</th><th>Escritório</th><th>Status</th><th>Uso/mês</th><th>Ações</th></tr></thead>
     <tbody>{linhas}</tbody></table></body></html>"""
@@ -1095,10 +1132,9 @@ def admin():
 
 
 @app.route("/admin/status/<int:uid>/<novo>")
-@login_required
 def admin_status(uid, novo):
-    if not current_user.is_admin or novo not in ("ativo", "inativo", "trial"):
-        return redirect(url_for("index"))
+    if not _admin_logado() or novo not in ("ativo", "inativo", "trial"):
+        return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if u:
         u.status = novo            # legado
@@ -1109,11 +1145,10 @@ def admin_status(uid, novo):
 
 
 @app.route("/admin/plano/<int:uid>/<plano>")
-@login_required
 def admin_plano(uid, plano):
     """Define o plano do escritório do usuário como cortesia (ativa sem cobrança)."""
-    if not current_user.is_admin or plano not in PLANOS:
-        return redirect(url_for("index"))
+    if not _admin_logado() or plano not in PLANOS:
+        return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if u and u.org:
         u.org.plano = plano
