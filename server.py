@@ -219,6 +219,20 @@ class User(UserMixin, db.Model):
         db.session.commit()
 
 
+class Caso(db.Model):
+    """Caso salvo de análise — fica no servidor, compartilhado pelo escritório."""
+    __tablename__ = "caso"
+    id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("escritorio.id"), index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    nome = db.Column(db.String(255))
+    payload = db.Column(db.Text)  # JSON: {"dados": {...}, "dividas": [...]}
+    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+    atualizado_em = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    autor = db.relationship("User", foreign_keys=[user_id])
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
@@ -565,6 +579,64 @@ def api_me():
         "membros": (org.total_membros if org else 1),
         "max_membros": (org.max_membros if org else 1),
     })
+
+
+# ============================================================
+# Casos salvos (no servidor, compartilhados pelo escritório)
+# ============================================================
+def _caso_to_dict(c, completo=True):
+    d = {
+        "id": c.id,
+        "nomeCaso": c.nome or "Caso sem nome",
+        "salvoEm": (c.atualizado_em or c.criado_em or datetime.utcnow()).isoformat(),
+        "autor": (c.autor.nome or c.autor.email) if c.autor else "",
+    }
+    try:
+        payload = json.loads(c.payload or "{}")
+    except Exception:
+        payload = {}
+    if completo:
+        d["dados"] = payload.get("dados", {})
+        d["dividas"] = payload.get("dividas", [])
+    else:
+        d["n_dividas"] = len(payload.get("dividas", []) or [])
+    return d
+
+
+@app.route("/api/casos", methods=["GET"])
+@login_required
+def casos_listar():
+    q = Caso.query
+    if current_user.org_id:
+        q = q.filter_by(org_id=current_user.org_id)
+    else:
+        q = q.filter_by(user_id=current_user.id)
+    casos = q.order_by(Caso.atualizado_em.desc()).all()
+    return jsonify({"ok": True, "casos": [_caso_to_dict(c, completo=True) for c in casos]})
+
+
+@app.route("/api/casos", methods=["POST"])
+@login_required
+def casos_salvar():
+    body = request.get_json(silent=True) or {}
+    nome = (body.get("nomeCaso") or "Caso sem nome").strip()[:255]
+    payload = json.dumps({"dados": body.get("dados", {}), "dividas": body.get("dividas", [])})
+    caso = Caso(org_id=current_user.org_id, user_id=current_user.id, nome=nome, payload=payload)
+    db.session.add(caso)
+    db.session.commit()
+    return jsonify({"ok": True, "id": caso.id})
+
+
+@app.route("/api/casos/<int:cid>", methods=["DELETE"])
+@login_required
+def casos_excluir(cid):
+    c = db.session.get(Caso, cid)
+    if not c or (current_user.org_id and c.org_id != current_user.org_id) or \
+       (not current_user.org_id and c.user_id != current_user.id):
+        return jsonify({"ok": False, "erro": "Caso não encontrado."}), 404
+    db.session.delete(c)
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/extract-holerite", methods=["POST"])

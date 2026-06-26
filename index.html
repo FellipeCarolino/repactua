@@ -2704,37 +2704,32 @@
     'ctxGenero','ctxIdade','ctxEscolaridade','ctxDependentes','ctxEnfermidade','ctxViolencia','ctxBets',
   ].concat(DESPESAS_CATEGORIAS.map(c => despesaInputId(c.key)));
 
-  function getCasos() {
-    try { return JSON.parse(localStorage.getItem('casos_superendividamento')) || []; }
-    catch { return []; }
-  }
+  // Casos salvos NO SERVIDOR (compartilhados pelo escritório, acessíveis de qualquer máquina)
+  let CASOS_CACHE = [];
 
-  function setCasos(casos) {
-    localStorage.setItem('casos_superendividamento', JSON.stringify(casos));
-  }
-
-  function salvarCaso() {
+  async function salvarCaso() {
     const nomeCaso = document.getElementById('nomeCaso').value.trim()
       || document.getElementById('nome').value.trim()
       || 'Caso sem nome';
     const dados = {};
     CAMPOS_FORMULARIO.forEach(id => dados[id] = document.getElementById(id).value);
-    const casos = getCasos();
-    const caso = {
-      id: Date.now(),
+    const body = {
       nomeCaso,
-      salvoEm: new Date().toISOString(),
       dados,
       dividas: dividas.map(d => ({ credor: d.credor, tipo: d.tipo, saldoCents: d.saldoCents, parcelaCents: d.parcelaCents, emFolha: d.emFolha, parcContratadas: d.parcContratadas, parcPagas: d.parcPagas })),
     };
-    casos.unshift(caso);
-    setCasos(casos);
-    document.getElementById('nomeCaso').value = '';
-    listarCasos();
+    try {
+      const r = await fetch('/api/casos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error();
+      document.getElementById('nomeCaso').value = '';
+      await listarCasos();
+    } catch {
+      alert('Não foi possível salvar o caso. Verifique sua conexão e se você está logado.');
+    }
   }
 
   function carregarCaso(id) {
-    const caso = getCasos().find(c => c.id === id);
+    const caso = CASOS_CACHE.find(c => c.id === id);
     if (!caso) return;
     CAMPOS_FORMULARIO.forEach(cid => {
       const el = document.getElementById(cid);
@@ -2753,26 +2748,40 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function excluirCaso(id) {
-    const caso = getCasos().find(c => c.id === id);
+  async function excluirCaso(id) {
+    const caso = CASOS_CACHE.find(c => c.id === id);
     if (!caso) return;
     if (!confirm(`Excluir o caso "${caso.nomeCaso}"? Essa ação não pode ser desfeita.`)) return;
-    setCasos(getCasos().filter(c => c.id !== id));
-    listarCasos();
+    try {
+      const r = await fetch('/api/casos/' + id, { method: 'DELETE' });
+      if (!r.ok) throw new Error();
+      await listarCasos();
+    } catch {
+      alert('Não foi possível excluir o caso.');
+    }
   }
 
-  function listarCasos() {
+  async function listarCasos() {
     const lista = document.getElementById('listaCasos');
-    const casos = getCasos();
-    if (casos.length === 0) {
+    lista.innerHTML = '<div style="color:var(--text-muted);font-size:0.87rem">Carregando casos…</div>';
+    try {
+      const r = await fetch('/api/casos');
+      const data = await r.json();
+      CASOS_CACHE = (data && data.casos) || [];
+    } catch {
+      CASOS_CACHE = [];
+      lista.innerHTML = '<div style="color:var(--danger);font-size:0.87rem">Não foi possível carregar os casos.</div>';
+      return;
+    }
+    if (CASOS_CACHE.length === 0) {
       lista.innerHTML = '<div style="color:var(--text-muted);font-size:0.87rem">Nenhum caso salvo ainda. Preencha o formulário e clique em "Salvar atual".</div>';
       return;
     }
-    lista.innerHTML = casos.map(c => `
+    lista.innerHTML = CASOS_CACHE.map(c => `
       <div class="caso-item">
         <div class="caso-info">
           <div class="caso-nome">${c.nomeCaso}</div>
-          <div class="caso-data">Salvo em ${new Date(c.salvoEm).toLocaleString('pt-BR')} · ${(c.dividas || []).length} dívida(s)</div>
+          <div class="caso-data">Salvo em ${new Date(c.salvoEm).toLocaleString('pt-BR')} · ${(c.dividas || []).length} dívida(s)${c.autor ? ' · ' + c.autor : ''}</div>
         </div>
         <button class="btn btn-primary" onclick="carregarCaso(${c.id})">Abrir</button>
         <button class="btn btn-outline" style="border-color:var(--danger);color:var(--danger)" onclick="excluirCaso(${c.id})">Excluir</button>
