@@ -613,6 +613,9 @@ def health():
         "ok": True, "model": MODEL,
         "tem_chave": bool(os.environ.get("ANTHROPIC_API_KEY")),
         "banco": dialect, "contas": total_contas,
+        "preco_individual": valor_cobranca("individual"),
+        "preco_escritorio": valor_cobranca("escritorio"),
+        "modo_teste_preco": bool(os.environ.get("PLANO_VALOR")),
     })
 
 
