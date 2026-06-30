@@ -1672,9 +1672,14 @@ def admin_config_webhook():
     msg = ""
     if request.method == "POST":
         try:
+            try:
+                _em = asaas("GET", "/myAccount").get("email") or ADMIN_EMAIL
+            except Exception:
+                _em = ADMIN_EMAIL
             r = asaas("POST", "/webhooks", {
                 "name": "Repactua",
                 "url": "https://repactua.com.br/api/asaas-webhook",
+                "email": _em,
                 "enabled": True,
                 "interrupted": False,
                 "authToken": ASAAS_WEBHOOK_TOKEN,
