@@ -1589,6 +1589,10 @@ def admin_subconta():
             "postalCode": "".join(filter(str.isdigit, request.form.get("postalCode") or "")),
         }
         try:
+            payload["incomeValue"] = float((request.form.get("incomeValue") or "0").replace(",", "."))
+        except ValueError:
+            payload["incomeValue"] = 0
+        try:
             r = asaas("POST", "/accounts", payload)
             api_key = r.get("apiKey", "")
             wallet = r.get("walletId", "")
@@ -1634,6 +1638,7 @@ def admin_subconta():
     <div class="card"><form method="post">
       <label>Nome da subconta</label><input name="name" value="{d['name']}" required>
       <label>E-mail (precisa ser diferente do e-mail da conta-mãe)</label><input name="email" type="email" placeholder="repactua@sorvezenetechnology.com.br" required>
+      <label>Faturamento mensal médio (R$)</label><input name="incomeValue" type="number" step="0.01" value="5000" required>
       <div class="row">
         <div><label>CNPJ</label><input name="cpfCnpj" value="{d['cpfCnpj']}" required></div>
         <div><label>Tipo</label><select name="companyType">
