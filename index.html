@@ -2524,7 +2524,9 @@
 
     // ---- Plano de Pagamento Sugerido (com parcela EDITÁVEL) ----
     PLANO_CTX = {
-      totalSaldo, rendaLiquida: r.rendaLiquida, cap30, cap35, tetoParcela,
+      totalSaldo, rendaLiquida: r.rendaLiquida, cap30, cap35,
+      tetoLegal: cap35,                                    // limite duro: 35% da renda líquida
+      tetoEstrito: Math.min(cap35, Math.max(rendaDisponivel, 0)),  // o que sobra preservando o mínimo adotado
       rendaDisponivel, parcelaPor60, parcelaSistema: parcelaSugerida, PRAZO_MAX,
       base: distribuicao.map(x => ({ credor: x.credor, tipo: x.tipo, saldo: x.saldo, pctSaldo: x.pctSaldo })),
     };
@@ -2538,11 +2540,11 @@
         <div class="plano-box"><div class="plano-lbl">Capacidade de pagamento (30%–35%)</div><div class="plano-val">${fmtCents(cap30)} – ${fmtCents(cap35)}</div><div class="plano-sub">da renda líquida (${fmtCents(r.rendaLiquida)})</div></div>
         <div class="plano-box" style="background:${planoStatusBg};border-color:${planoStatusCor}">
           <div class="plano-lbl">✏️ Parcela do plano — editável</div>
-          <input id="parcelaEscolhida" type="text" inputmode="numeric" value="${fmtCentsPlain(parcelaSugerida)}"
-            oninput="mascararParcela(this)" ${tetoParcela <= 0 ? 'disabled' : ''}
+          <input id="parcelaEscolhida" type="text" inputmode="numeric" value="${parcelaSugerida > 0 ? fmtCentsPlain(parcelaSugerida) : ''}"
+            placeholder="digite a parcela" oninput="mascararParcela(this)" ${cap35 <= 0 ? 'disabled' : ''}
             style="width:100%;max-width:150px;margin:4px auto;display:block;text-align:center;font-size:1.15rem;font-weight:800;color:${planoStatusCor};border:1.5px dashed ${planoStatusCor};border-radius:8px;padding:6px 8px;background:#fff">
-          <div class="plano-sub" id="parcelaEscolhidaInfo">${pct(parcelaSugeridaPct)} da renda líquida${dentroDe30a35 ? ' ✓ (faixa 30–35%)' : ''}</div>
-          <div class="plano-sub"><a href="javascript:void(0)" onclick="usarParcela(PLANO_CTX.parcelaSistema)" style="color:var(--accent-dark,#9a6700);font-weight:700;text-decoration:underline">↩ usar a sugerida (${fmtCents(parcelaSugerida)})</a></div>
+          <div class="plano-sub" id="parcelaEscolhidaInfo">${parcelaSugerida > 0 ? pct(parcelaSugeridaPct) + ' da renda líquida' + (dentroDe30a35 ? ' ✓ (faixa 30–35%)' : '') : 'digite um valor ou use um cenário abaixo'}</div>
+          ${parcelaSugerida > 0 ? `<div class="plano-sub"><a href="javascript:void(0)" onclick="usarParcela(PLANO_CTX.parcelaSistema)" style="color:var(--accent-dark,#9a6700);font-weight:700;text-decoration:underline">↩ usar a sugerida (${fmtCents(parcelaSugerida)})</a></div>` : ''}
         </div>
         <div class="plano-box"><div class="plano-lbl">Prazo estimado com a parcela</div><div class="plano-val" id="planoPrazoVal">${mesesPlano === null ? 'Inviável' : mesesPlano + ' meses'}</div><div class="plano-sub" id="planoRemicaoSub"></div></div>
       </div>
@@ -2562,7 +2564,7 @@
             <button class="btn btn-outline" style="margin-top:8px;padding:4px 14px;font-size:0.76rem" onclick="usarParcela(${c.parcela})">Usar esta parcela</button>
           </div>`).join('')}
       </div>
-      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">A parcela legal deve ficar entre 30% e 35% da renda líquida e quitar em até 60 meses. Você pode <b>editar a parcela</b> no quadro acima — o sistema recalcula prazo e divisão por credor, sempre limitado ao teto legal (35% / mínimo existencial preservado).</p>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">A parcela legal deve ficar entre 30% e 35% da renda líquida e quitar em até 60 meses. Você pode <b>editar a parcela</b> no quadro acima — o sistema recalcula prazo e divisão por credor, limita ao teto legal de 35% e, se a parcela invadir o mínimo existencial, exibe a fundamentação jurídica necessária (sem travar seu trabalho).</p>
 
       ${distribuicao.length ? `
       <h4 style="font-size:0.9rem;font-weight:700;color:var(--primary);margin:20px 0 10px">📊 Divisão da parcela por credor</h4>
@@ -2809,14 +2811,22 @@
     let cents = parseMoney(el.value);
     const avisos = [];
 
-    // --- Parâmetros do sistema (invioláveis) ---
-    if (P.tetoParcela > 0 && cents > P.tetoParcela) {
-      cents = P.tetoParcela;
+    // --- Parâmetro inviolável: teto legal de 35% da renda líquida ---
+    if (P.tetoLegal > 0 && cents > P.tetoLegal) {
+      cents = P.tetoLegal;
       el.value = fmtCentsPlain(cents);
-      avisos.push(`⛔ <b>Limite do sistema:</b> a parcela foi ajustada ao teto de ${fmtCents(P.tetoParcela)} — ` +
-        (P.tetoParcela === P.cap35
-          ? '35% da renda líquida (parâmetro jurisprudencial máximo).'
-          : 'valor máximo que preserva o mínimo existencial (renda disponível).'));
+      avisos.push(`⛔ <b>Limite do sistema:</b> a parcela foi ajustada ao teto de ${fmtCents(P.tetoLegal)} — 35% da renda líquida (parâmetro jurisprudencial máximo).`);
+    }
+
+    // --- Mínimo existencial: avisa e fundamenta, sem travar o trabalho do advogado ---
+    if (cents > 0 && cents > P.tetoEstrito) {
+      const deficit = P.rendaDisponivel < 0 ? fmtCents(-P.rendaDisponivel) : null;
+      avisos.push(
+        `🚨 <b>Mínimo existencial:</b> pelo critério adotado no cálculo, a renda disponível é de ${fmtCents(Math.max(P.rendaDisponivel, 0))}` +
+        (deficit ? ` (há <b>déficit mensal de ${deficit}</b> antes de qualquer parcela)` : '') +
+        `. A parcela de ${fmtCents(cents)} ${P.tetoEstrito > 0 ? 'excede essa margem e ' : ''}exige fundamentação: ` +
+        `revisão do orçamento/despesas, adoção do mínimo existencial regulamentar de R$ 600,00 (Decreto 11.150/2022, alterado pelo Decreto 11.567/2023) ` +
+        `e/ou pedido de remição/redução do passivo (art. 104-B, §4º, I, CDC). Registre a justificativa na petição.`);
     }
 
     const pctRenda = P.rendaLiquida > 0 ? (cents / P.rendaLiquida) * 100 : 0;
