@@ -1673,9 +1673,42 @@ def admin_subconta():
     return Response(html, mimetype="text/html")
 
 
+def _pagamentos_repactua():
+    """Busca no Asaas os pagamentos do Repactua (descrição contém 'repactua')."""
+    pags = []
+    try:
+        offset = 0
+        while offset <= 200:  # até 300 pagamentos
+            r = asaas("GET", f"/payments?limit=100&offset={offset}")
+            data = r.get("data") or []
+            pags.extend(data)
+            if len(data) < 100:
+                break
+            offset += 100
+    except Exception:
+        return []
+    return [p for p in pags if "repactua" in (p.get("description") or "").lower()]
+
+
+def _mapa_clientes_asaas():
+    """id -> nome dos clientes no Asaas (para exibir nos pagamentos)."""
+    mapa = {}
+    try:
+        for offset in (0, 100):
+            r = asaas("GET", f"/customers?limit=100&offset={offset}")
+            data = r.get("data") or []
+            for c in data:
+                mapa[c.get("id")] = c.get("name") or c.get("email") or "—"
+            if len(data) < 100:
+                break
+    except Exception:
+        pass
+    return mapa
+
+
 @app.route("/admin/financeiro")
 def admin_financeiro():
-    """Painel financeiro: MRR, contas por situação e tabela de assinantes."""
+    """Painel financeiro: receita real (Asaas), MRR, gráfico e assinantes."""
     if not _admin_logado():
         return redirect(url_for("admin_login"))
     orgs = Escritorio.query.order_by(Escritorio.criado_em.desc()).all()
@@ -1717,6 +1750,86 @@ def admin_financeiro():
           <td>{cadastro}</td></tr>"""
     mrr_fmt = ("R$ %.2f" % mrr).replace(".", ",")
 
+    # ---- Receita REAL (pagamentos do Asaas com "Repactua" na descrição) ----
+    def fmt_moeda(v):
+        return ("R$ %.2f" % v).replace(".", ",")
+
+    def _data_pag(p):
+        return (p.get("clientPaymentDate") or p.get("paymentDate")
+                or p.get("confirmedDate") or p.get("dueDate") or "")
+
+    pags = _pagamentos_repactua()
+    RECEBIDO = ("RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH")
+    mes_atual = datetime.utcnow().strftime("%Y-%m")
+    receb_mes = receb_total = a_receber = 0.0
+    por_mes = {}
+    for p in pags:
+        v = float(p.get("value") or 0)
+        st = p.get("status") or ""
+        if st in RECEBIDO:
+            receb_total += v
+            mkey = _data_pag(p)[:7]
+            por_mes[mkey] = por_mes.get(mkey, 0) + v
+            if mkey == mes_atual:
+                receb_mes += v
+        elif st in ("PENDING", "OVERDUE"):
+            a_receber += v
+
+    # últimos 6 meses para o gráfico
+    MESES_PT = ["jan", "fev", "mar", "abr", "mai", "jun",
+                "jul", "ago", "set", "out", "nov", "dez"]
+    hoje = date.today()
+    labels, valores = [], []
+    ano, mes = hoje.year, hoje.month
+    chaves = []
+    for _ in range(6):
+        chaves.append((ano, mes))
+        mes -= 1
+        if mes == 0:
+            mes, ano = 12, ano - 1
+    for a, m in reversed(chaves):
+        labels.append(f"{MESES_PT[m-1]}/{str(a)[2:]}")
+        valores.append(round(por_mes.get(f"{a:04d}-{m:02d}", 0), 2))
+
+    # pagamentos recentes (últimos 10)
+    nomes = _mapa_clientes_asaas() if pags else {}
+    STATUS_PT = {"RECEIVED": ("Recebido", "b-ativo"), "CONFIRMED": ("Confirmado", "b-ativo"),
+                 "RECEIVED_IN_CASH": ("Recebido", "b-ativo"), "PENDING": ("Aguardando", "b-trial"),
+                 "OVERDUE": ("Vencido", "b-inativo"), "REFUNDED": ("Estornado", "b-inativo")}
+    FORMA_PT = {"PIX": "Pix", "BOLETO": "Boleto", "CREDIT_CARD": "Cartão", "UNDEFINED": "—"}
+    pags_ord = sorted(pags, key=_data_pag, reverse=True)[:10]
+    linhas_pag = ""
+    for p in pags_ord:
+        dt = _data_pag(p)
+        dt_fmt = f"{dt[8:10]}/{dt[5:7]}/{dt[:4]}" if len(dt) >= 10 else "—"
+        st_nome, st_cls = STATUS_PT.get(p.get("status") or "", (p.get("status") or "—", "b-trial"))
+        linhas_pag += f"""<tr>
+          <td>{dt_fmt}</td>
+          <td>{nomes.get(p.get("customer"), "—")}</td>
+          <td>{fmt_moeda(float(p.get("value") or 0))}</td>
+          <td>{FORMA_PT.get(p.get("billingType") or "", p.get("billingType") or "—")}</td>
+          <td><span class="badge {st_cls}">{st_nome}</span></td></tr>"""
+    if not linhas_pag:
+        linhas_pag = '<tr><td colspan="5" style="color:#8a97a5">Nenhum pagamento do Repactua encontrado no Asaas.</td></tr>'
+
+    grafico_js = """
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+    new Chart(document.getElementById('grafReceita'), {
+      type: 'bar',
+      data: { labels: %s, datasets: [{ label: 'Recebido (R$)', data: %s,
+        backgroundColor: '#1a3a5c', hoverBackgroundColor: '#c8960c', borderRadius: 6 }] },
+      options: { plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { callback: function(v){ return 'R$ ' + v; } } } } }
+    });
+    function filtrarTabela() {
+      var q = document.getElementById('busca').value.toLowerCase();
+      document.querySelectorAll('#tbAssinantes tr').forEach(function(tr) {
+        tr.style.display = tr.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    }
+    </script>""" % (json.dumps(labels), json.dumps(valores))
+
     html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Financeiro · Repactua</title><style>
     *{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}}
@@ -1727,36 +1840,62 @@ def admin_financeiro():
     .barra a{{color:#fff;text-decoration:none;font-size:.85rem;opacity:.9;margin-left:16px}} .barra a:hover{{color:#f0b429}}
     .wrap{{max-width:1160px;margin:0 auto;padding:24px}}
     h1{{color:#1a3a5c;font-size:1.4rem;margin-bottom:2px}} .sub{{color:#5a6a7a;font-size:.88rem;margin-bottom:18px}}
-    .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px}}
-    .mc{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:18px 20px}}
-    .mc .lbl{{font-size:.74rem;text-transform:uppercase;letter-spacing:.4px;color:#5a6a7a;margin-bottom:6px}}
-    .mc .val{{font-size:1.7rem;font-weight:700;color:#1a3a5c}}
-    .mc.mrr{{border-left:4px solid #1e7e34}} .mc.mrr .val{{color:#1e7e34}}
+    h2{{color:#1a3a5c;font-size:1.02rem;margin:22px 0 10px}}
+    .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:6px}}
+    .mc{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:16px 18px}}
+    .mc .lbl{{font-size:.72rem;text-transform:uppercase;letter-spacing:.4px;color:#5a6a7a;margin-bottom:6px}}
+    .mc .val{{font-size:1.55rem;font-weight:700;color:#1a3a5c}}
+    .mc.verde{{border-left:4px solid #1e7e34}} .mc.verde .val{{color:#1e7e34}}
+    .mc.ouro{{border-left:4px solid #c8960c}} .mc.ouro .val{{color:#9a6700}}
     .mc.emteste .val{{color:#c8960c}} .mc.inativo .val{{color:#a3271a}}
+    .painel{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:18px}}
     table{{width:100%;border-collapse:collapse;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.07);border-radius:10px;overflow:hidden}}
     th{{background:#1a3a5c;color:#fff;padding:11px;text-align:left;font-size:.74rem;text-transform:uppercase;letter-spacing:.4px}}
     td{{padding:11px;border-bottom:1px solid #eef1f5;font-size:.88rem}} tr:hover td{{background:#fafbfd}}
     small{{color:#8a97a5}}
     .badge{{padding:3px 12px;border-radius:20px;font-size:.76rem;font-weight:700}}
-    .b-ativo{{background:#e9f7ee;color:#1b5e20}}.b-trial{{background:#fff4e0;color:#9a6700}}.b-inativo{{background:#fdecea;color:#7a2218}}</style></head>
+    .b-ativo{{background:#e9f7ee;color:#1b5e20}}.b-trial{{background:#fff4e0;color:#9a6700}}.b-inativo{{background:#fdecea;color:#7a2218}}
+    .busca{{width:100%;max-width:340px;padding:10px 14px;border:1.5px solid #d0d7e2;border-radius:8px;font-size:.9rem;background:#fff;margin-bottom:10px}}
+    .duas{{display:grid;grid-template-columns:1.1fr .9fr;gap:16px;align-items:start}}
+    @media(max-width:900px){{.duas{{grid-template-columns:1fr}}}}</style></head>
     <body><div class="barra">
       <div class="marca">{logo_repactua(30)} <div>Repactua<small>Painel financeiro</small></div></div>
       <div><a href="/admin">← Assinantes</a><a href="/admin/logout">Sair do admin ↪</a></div>
     </div>
     <div class="wrap">
       <h1>Financeiro do Repactua</h1>
-      <div class="sub">Situação da assinatura e receita recorrente</div>
+      <div class="sub">Receita real (Asaas) e situação das assinaturas</div>
       <div class="cards">
-        <div class="mc mrr"><div class="lbl">Receita mensal (MRR)</div><div class="val">{mrr_fmt}</div></div>
+        <div class="mc verde"><div class="lbl">Recebido este mês</div><div class="val">{fmt_moeda(receb_mes)}</div></div>
+        <div class="mc verde"><div class="lbl">Recebido (total)</div><div class="val">{fmt_moeda(receb_total)}</div></div>
+        <div class="mc ouro"><div class="lbl">A receber</div><div class="val">{fmt_moeda(a_receber)}</div></div>
+        <div class="mc"><div class="lbl">MRR (planos pagos)</div><div class="val">{mrr_fmt}</div></div>
+      </div>
+      <div class="cards">
         <div class="mc"><div class="lbl">Pagantes</div><div class="val">{pagantes}</div></div>
         <div class="mc"><div class="lbl">Em dia</div><div class="val">{ativos}</div></div>
         <div class="mc emteste"><div class="lbl">Em teste</div><div class="val">{trials}</div></div>
         <div class="mc inativo"><div class="lbl">Inativos</div><div class="val">{inativos}</div></div>
       </div>
+
+      <div class="duas">
+        <div>
+          <h2>📈 Receita recebida por mês</h2>
+          <div class="painel"><canvas id="grafReceita" height="210"></canvas></div>
+        </div>
+        <div>
+          <h2>💸 Últimos pagamentos</h2>
+          <table><thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Forma</th><th>Status</th></tr></thead>
+          <tbody>{linhas_pag}</tbody></table>
+        </div>
+      </div>
+
+      <h2>👥 Assinantes</h2>
+      <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, cidade...">
       <table><thead><tr><th>Assinante</th><th>Situação</th><th>Valor</th><th>Plano</th><th>Membros</th><th>Contato</th><th>Cidade</th><th>Cadastro</th></tr></thead>
-      <tbody>{linhas}</tbody></table>
-      <p style="font-size:.78rem;color:#8a97a5;margin-top:12px">MRR = soma apenas das assinaturas <b>pagas</b> ativas (contas de cortesia não entram na receita). "Em dia" conta todos os ativos, inclusive cortesias.</p>
-    </div></body></html>"""
+      <tbody id="tbAssinantes">{linhas}</tbody></table>
+      <p style="font-size:.78rem;color:#8a97a5;margin-top:12px">Recebido/A receber = pagamentos reais do Asaas com "Repactua" na descrição. MRR = soma dos planos <b>pagos</b> ativos (cortesias não entram). "Em dia" conta todos os ativos, inclusive cortesias.</p>
+    </div>{grafico_js}</body></html>"""
     return Response(html, mimetype="text/html")
 
 
