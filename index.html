@@ -831,6 +831,24 @@
   <a href="/logout" style="color:#fff;text-decoration:none;opacity:0.85">Sair ↪</a>
 </div>
 
+<!-- Modal de conferência dos dados lidos pela IA -->
+<div class="modal-overlay" id="modalConferIA">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="conferIATitulo">🤖 Conferir dados lidos pela IA</h2>
+      <button class="fechar" onclick="fecharModal('modalConferIA')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="conferIACorpo"></div>
+      <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="fecharModal('modalConferIA')">Descartar</button>
+        <button class="btn btn-primary" id="btnAplicarIA">✔ Aplicar dados</button>
+      </div>
+      <p style="font-size:0.75rem;color:var(--text-muted);margin-top:10px">Revise e corrija os valores antes de aplicar — a IA pode errar em documentos de baixa qualidade. Nada é alterado no formulário até você clicar em "Aplicar". Campos vazios não sobrescrevem o que já está preenchido.</p>
+    </div>
+  </div>
+</div>
+
 <header>
   <div class="logo-icon">
     <svg width="34" height="34" viewBox="0 0 80 80" aria-hidden="true">
@@ -1933,6 +1951,128 @@
   const MSG_SEM_SERVIDOR = 'A leitura por IA exige o servidor rodando (python server.py). ' +
     'Abrindo o arquivo direto no navegador, preencha os campos manualmente. Veja o README.';
 
+  // ============================================================
+  // CONFERÊNCIA DOS DADOS DA IA — o advogado revisa/corrige antes de aplicar
+  // ============================================================
+  let CONFER_IA_APLICAR = null;
+
+  const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function mascararMoedaLivre(el) {
+    const c = parseMoney(el.value);
+    el.value = c === 0 ? '' : fmtCentsPlain(c);
+  }
+
+  function abrirConferIA(titulo, corpoHtml, onAplicar) {
+    document.getElementById('conferIATitulo').textContent = titulo;
+    document.getElementById('conferIACorpo').innerHTML = corpoHtml;
+    CONFER_IA_APLICAR = onAplicar;
+    document.getElementById('btnAplicarIA').onclick = function () {
+      try { if (CONFER_IA_APLICAR) CONFER_IA_APLICAR(); } finally { fecharModal('modalConferIA'); }
+    };
+    abrirModal('modalConferIA');
+  }
+
+  function _campoConfer(id, label, valorHtml) {
+    return `<div><label style="display:block;font-size:0.72rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin:0 0 4px">${label}</label>${valorHtml}</div>`;
+  }
+  const _inMoney = (id, reais) =>
+    `<input id="${id}" type="text" inputmode="numeric" oninput="mascararMoedaLivre(this)" value="${reais !== null && reais !== undefined ? fmtCentsPlain(reaisToCents(reais)) : ''}" placeholder="—" style="width:100%">`;
+  const _inText = (id, v) =>
+    `<input id="${id}" type="text" value="${escHtml(v || '')}" placeholder="—" style="width:100%">`;
+  const _inNum = (id, v) =>
+    `<input id="${id}" type="number" min="0" value="${v !== null && v !== undefined ? v : ''}" placeholder="—" style="width:100%">`;
+
+  function conferirHolerite(d) {
+    const consigRows = (d.consignados || []).map((c, i) => `
+      <tr>
+        <td style="text-align:center"><input type="checkbox" id="cfc_ok_${i}" checked style="width:18px;height:18px"></td>
+        <td>${_inText('cfc_cred_' + i, c.credor || 'Consignado')}</td>
+        <td>${_inMoney('cfc_par_' + i, c.parcela)}</td>
+      </tr>`).join('');
+    const blocoConsig = (d.consignados || []).length ? `
+      <h4 style="font-size:0.85rem;font-weight:700;color:var(--primary);margin:16px 0 8px">Consignados identificados (serão adicionados às dívidas)</h4>
+      <table style="width:100%"><thead><tr><th style="width:60px">Incluir</th><th>Credor</th><th>Parcela/mês</th></tr></thead>
+      <tbody>${consigRows}</tbody></table>` : '';
+    const obs = d.observacoes ? `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem">💡 <b>Observações da IA:</b> ${escHtml(d.observacoes)}</div>` : '';
+    const corpo = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        ${_campoConfer('cfh_nome', 'Nome do interessado', _inText('cfh_nome', d.nome))}
+        ${_campoConfer('cfh_bruta', 'Renda bruta', _inMoney('cfh_bruta', d.renda_bruta))}
+        ${_campoConfer('cfh_inss', 'INSS / Previdência', _inMoney('cfh_inss', d.inss))}
+        ${_campoConfer('cfh_irrf', 'IRRF (do holerite)', _inMoney('cfh_irrf', d.irrf))}
+        ${_campoConfer('cfh_pensao', 'Pensão alimentícia', _inMoney('cfh_pensao', d.pensao))}
+        ${_campoConfer('cfh_outros', 'Outros descontos', _inMoney('cfh_outros', d.outros_descontos))}
+        ${_campoConfer('cfh_consig', 'Total consignados em folha', _inMoney('cfh_consig', d.consignados_total))}
+      </div>
+      ${blocoConsig}${obs}`;
+    abrirConferIA('🧾 Conferir holerite lido pela IA', corpo, () => {
+      const g = id => document.getElementById(id);
+      if (g('cfh_nome').value.trim()) document.getElementById('nome').value = g('cfh_nome').value.trim();
+      const setM = (src, dst) => {
+        if (g(src).value !== '') document.getElementById(dst).value = fmtCentsPlain(parseMoney(g(src).value));
+      };
+      setM('cfh_bruta', 'rendaBruta');
+      setM('cfh_inss', 'descINSS');
+      setM('cfh_pensao', 'descPensao');
+      setM('cfh_outros', 'descOutros');
+      setM('cfh_consig', 'descConsignado');
+      if (g('cfh_irrf').value !== '') {
+        document.getElementById('situacaoIR').value = 'manual';
+        alternarIR();
+        document.getElementById('descIRRF').value = fmtCentsPlain(parseMoney(g('cfh_irrf').value));
+      }
+      let n = 0;
+      (d.consignados || []).forEach((c, i) => {
+        const ok = g('cfc_ok_' + i);
+        if (ok && ok.checked) {
+          adicionarDivida(g('cfc_cred_' + i).value || 'Consignado', 'consignado', 0, parseMoney(g('cfc_par_' + i).value), true);
+          n++;
+        }
+      });
+      atualizarCascata();
+      iaStatus('iaHoleriteStatus', 'ok', `Dados aplicados ao formulário.${n ? ' ' + n + ' consignado(s) adicionado(s) às dívidas.' : ''} Revise e clique em Calcular.`);
+    });
+  }
+
+  function conferirContrato(d, id) {
+    const statusId = 'iaContratoStatus' + id;
+    const tipoSel = `<select id="cft_tipo" style="width:100%">${TIPOS_DIVIDA.map(t =>
+      `<option value="${t.value}" ${d.tipo === t.value ? 'selected' : ''}>${t.label}</option>`).join('')}</select>`;
+    const extras = [];
+    if (d.taxa_juros) extras.push(`<b>Juros informados:</b> ${escHtml(d.taxa_juros)}`);
+    if (d.observacoes) extras.push(`<b>Observações da IA:</b> ${escHtml(d.observacoes)}`);
+    const obs = extras.length ? `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem">💡 ${extras.join('<br>')}</div>` : '';
+    const corpo = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        ${_campoConfer('cft_credor', 'Credor', _inText('cft_credor', d.credor))}
+        ${_campoConfer('cft_tipo', 'Tipo da dívida', tipoSel)}
+        ${_campoConfer('cft_saldo', 'Saldo devedor', _inMoney('cft_saldo', d.saldo_devedor))}
+        ${_campoConfer('cft_parcela', 'Parcela mensal', _inMoney('cft_parcela', d.parcela_mensal))}
+        ${_campoConfer('cft_contr', 'Parcelas contratadas', _inNum('cft_contr', d.parcelas_contratadas))}
+        ${_campoConfer('cft_pagas', 'Parcelas pagas', _inNum('cft_pagas', d.parcelas_pagas))}
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:0.85rem">
+        <input type="checkbox" id="cft_folha" ${d.em_folha === true ? 'checked' : ''} style="width:18px;height:18px">
+        Desconto em folha (consignado)
+      </label>
+      ${obs}`;
+    abrirConferIA('📑 Conferir contrato lido pela IA', corpo, () => {
+      const g = i2 => document.getElementById(i2);
+      const dv = dividas.find(x => x.id === id);
+      if (!dv) return;
+      if (g('cft_credor').value.trim()) dv.credor = g('cft_credor').value.trim();
+      dv.tipo = g('cft_tipo').value;
+      if (g('cft_saldo').value !== '') dv.saldoCents = parseMoney(g('cft_saldo').value);
+      if (g('cft_parcela').value !== '') dv.parcelaCents = parseMoney(g('cft_parcela').value);
+      if (g('cft_contr').value !== '') dv.parcContratadas = parseInt(g('cft_contr').value, 10) || null;
+      if (g('cft_pagas').value !== '') dv.parcPagas = parseInt(g('cft_pagas').value, 10) || 0;
+      dv.emFolha = g('cft_folha').checked;
+      renderDividas();
+      iaStatus(statusId, 'ok', 'Dados do contrato aplicados. Revise e clique em Calcular.');
+    });
+  }
+
   async function lerHoleriteIA(input) {
     const file = input.files && input.files[0];
     if (!file) return;
@@ -1945,30 +2085,8 @@
     iaStatus('iaHoleriteStatus', 'load', `Lendo "${file.name}" com IA… isso pode levar alguns segundos.`);
     try {
       const d = await enviarDocumento('/api/extract-holerite', file);
-      if (d.nome) document.getElementById('nome').value = d.nome;
-      fillMoneyReais('rendaBruta', d.renda_bruta);
-      fillMoneyReais('descINSS', d.inss);
-      fillMoneyReais('descPensao', d.pensao);
-      fillMoneyReais('descOutros', d.outros_descontos);
-      fillMoneyReais('descConsignado', d.consignados_total);
-      // IRRF: usa o valor real do holerite (modo manual)
-      if (d.irrf !== null && d.irrf !== undefined) {
-        document.getElementById('situacaoIR').value = 'manual';
-        alternarIR();
-        fillMoneyReais('descIRRF', d.irrf);
-      }
-      // Cria as dívidas de consignado identificadas (já em folha)
-      let nConsig = 0;
-      (d.consignados || []).forEach(c => {
-        if (c && (c.parcela || c.credor)) {
-          adicionarDivida(c.credor || 'Consignado', 'consignado', 0, reaisToCents(c.parcela), true);
-          nConsig++;
-        }
-      });
-      atualizarCascata();
-      const extra = nConsig ? ` ${nConsig} consignado(s) adicionado(s) às dívidas.` : '';
-      const obs = d.observacoes ? `<br><span style="opacity:0.8">Obs.: ${d.observacoes}</span>` : '';
-      iaStatus('iaHoleriteStatus', 'ok', `Holerite lido e campos preenchidos.${extra} Confira os valores antes de calcular.${obs}`);
+      iaStatus('iaHoleriteStatus', 'ok', 'Holerite lido! Confira os dados extraídos na janela e clique em "Aplicar".');
+      conferirHolerite(d);
     } catch (e) {
       const msg = (e instanceof TypeError || e.semBackend) ? MSG_SEM_SERVIDOR : ('Não foi possível ler o documento: ' + e.message);
       iaStatus('iaHoleriteStatus', 'erro', msg);
@@ -1992,19 +2110,8 @@
     iaStatus(statusId, 'load', `Lendo "${file.name}" com IA…`);
     try {
       const d = await enviarDocumento('/api/extract-contrato', file);
-      const dv = dividas.find(x => x.id === id);
-      if (!dv) return;
-      if (d.credor) dv.credor = d.credor;
-      if (d.tipo && getTipo(d.tipo).value === d.tipo) dv.tipo = d.tipo;
-      if (d.saldo_devedor !== null && d.saldo_devedor !== undefined) dv.saldoCents = reaisToCents(d.saldo_devedor);
-      if (d.parcela_mensal !== null && d.parcela_mensal !== undefined) dv.parcelaCents = reaisToCents(d.parcela_mensal);
-      if (d.parcelas_contratadas !== null && d.parcelas_contratadas !== undefined) dv.parcContratadas = d.parcelas_contratadas;
-      if (d.parcelas_pagas !== null && d.parcelas_pagas !== undefined) dv.parcPagas = d.parcelas_pagas;
-      if (d.em_folha === true || d.em_folha === false) dv.emFolha = d.em_folha;
-      renderDividas();
-      const obs = d.observacoes ? `<br><span style="opacity:0.8">Obs.: ${d.observacoes}</span>` : '';
-      const juros = d.taxa_juros ? ` Juros informados: ${d.taxa_juros}.` : '';
-      iaStatus(statusId, 'ok', `Contrato lido e campos preenchidos.${juros} Confira antes de calcular.${obs}`);
+      iaStatus(statusId, 'ok', 'Contrato lido! Confira os dados extraídos na janela e clique em "Aplicar".');
+      conferirContrato(d, id);
     } catch (e) {
       const msg = (e instanceof TypeError || e.semBackend) ? MSG_SEM_SERVIDOR : ('Não foi possível ler o contrato: ' + e.message);
       iaStatus(statusId, 'erro', msg);
