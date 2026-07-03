@@ -407,11 +407,19 @@ SCHEMA_CONTRATO = {
 }
 
 PROMPT_HOLERITE = (
-    "Você é um analista jurídico-financeiro especializado em folhas de pagamento brasileiras. "
+    "Você é um analista jurídico-financeiro especializado em folhas de pagamento brasileiras "
+    "(CLT, servidores públicos e militares). "
     "Leia o documento e extraia os dados para análise de superendividamento. "
     "Separe proventos de descontos. 'renda_bruta' = soma dos proventos brutos. "
-    "'inss' = INSS/PSS/previdência. 'outros_descontos' = descontos obrigatórios que não sejam INSS, IRRF, pensão ou consignados. "
-    "'consignados' = empréstimos/cartões consignados em folha (liste credor e parcela). "
+    "'inss' = contribuição previdenciária obrigatória: INSS, PSS, ou, em contracheques militares, "
+    "a pensão militar / contribuição para a pensão militar. "
+    "'irrf' = imposto de renda efetivamente RETIDO na folha; se não houver retenção "
+    "(ex.: isento por moléstia grave ou faixa de isenção), retorne 0 — NUNCA estime ou calcule. "
+    "'outros_descontos' = soma dos demais descontos obrigatórios/compulsórios que não sejam INSS/PSS, "
+    "IRRF, pensão alimentícia ou consignados — ex.: FUSEX/fundo de saúde militar, assistência médica "
+    "obrigatória, contribuição sindical, coparticipação de plano de saúde, taxa de ocupação de imóvel funcional. "
+    "'consignados' = empréstimos/cartões consignados e financiamentos descontados em folha (liste credor e parcela). "
+    "Em 'observacoes', registre se a folha indica isenção de IR e descontos relevantes que você classificou em 'outros_descontos'. "
     "Valores em reais como número decimal (ex.: 5800.50), sem 'R$' nem separador de milhar. "
     "Se um campo não existir, retorne null. Não invente valores."
 )

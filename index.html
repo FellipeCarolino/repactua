@@ -1995,16 +1995,30 @@
       <table style="width:100%"><thead><tr><th style="width:60px">Incluir</th><th>Credor</th><th>Parcela/mês</th></tr></thead>
       <tbody>${consigRows}</tbody></table>` : '';
     const obs = d.observacoes ? `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem">💡 <b>Observações da IA:</b> ${escHtml(d.observacoes)}</div>` : '';
+    // Situação do IR: nunca deixar cair no "automático" sem querer —
+    // p/ isentos (ex.: moléstia grave) o auto descontaria um imposto inexistente e reduziria a margem.
+    const sitAtual = document.getElementById('situacaoIR').value;
+    const sitPre = sitAtual.indexOf('isento') === 0 ? sitAtual : 'manual';
+    const IR_OPCOES = [
+      { v: 'manual', l: 'Usar o valor do holerite' + (d.irrf ? '' : ' (sem retenção — R$ 0,00)') },
+      { v: 'isento_molestia', l: 'ISENTO — moléstia grave (câncer etc. · art. 6º, XIV, Lei 7.713/88)' },
+      { v: 'isento_faixa', l: 'ISENTO — renda na faixa de isenção' },
+      { v: 'isento_outro', l: 'ISENTO — outro motivo legal' },
+      { v: 'auto', l: 'Calcular pela tabela progressiva (ignora o holerite)' },
+    ];
+    const irSelect = `<select id="cfh_sitIR" style="width:100%;margin-top:6px;font-size:0.8rem">${IR_OPCOES.map(o =>
+      `<option value="${o.v}" ${o.v === sitPre ? 'selected' : ''}>${o.l}</option>`).join('')}</select>`;
     const corpo = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         ${_campoConfer('cfh_nome', 'Nome do interessado', _inText('cfh_nome', d.nome))}
         ${_campoConfer('cfh_bruta', 'Renda bruta', _inMoney('cfh_bruta', d.renda_bruta))}
-        ${_campoConfer('cfh_inss', 'INSS / Previdência', _inMoney('cfh_inss', d.inss))}
-        ${_campoConfer('cfh_irrf', 'IRRF (do holerite)', _inMoney('cfh_irrf', d.irrf))}
+        ${_campoConfer('cfh_inss', 'INSS / PSS / Previdência', _inMoney('cfh_inss', d.inss))}
+        ${_campoConfer('cfh_irrf', 'IRRF (do holerite)', _inMoney('cfh_irrf', d.irrf) + irSelect)}
         ${_campoConfer('cfh_pensao', 'Pensão alimentícia', _inMoney('cfh_pensao', d.pensao))}
-        ${_campoConfer('cfh_outros', 'Outros descontos', _inMoney('cfh_outros', d.outros_descontos))}
+        ${_campoConfer('cfh_outros', 'Outros descontos obrigatórios', _inMoney('cfh_outros', d.outros_descontos))}
         ${_campoConfer('cfh_consig', 'Total consignados em folha', _inMoney('cfh_consig', d.consignados_total))}
       </div>
+      ${d.irrf ? '' : `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem;background:#fffbea;border-color:#e6c45a;color:#5a4000">⚠️ <b>Sem IRRF no holerite.</b> Se a pessoa é <b>isenta</b> (ex.: moléstia grave), selecione a opção de isenção acima — <u>não</u> use o cálculo automático, que descontaria um imposto que ela não paga e reduziria a renda líquida e a margem indevidamente. Os demais descontos obrigatórios (PSS, pensão militar, FUSEX, plano de saúde etc.) continuam contando em "Outros descontos".</div>`}
       ${blocoConsig}${obs}`;
     abrirConferIA('🧾 Conferir holerite lido pela IA', corpo, () => {
       const g = id => document.getElementById(id);
@@ -2017,10 +2031,13 @@
       setM('cfh_pensao', 'descPensao');
       setM('cfh_outros', 'descOutros');
       setM('cfh_consig', 'descConsignado');
-      if (g('cfh_irrf').value !== '') {
-        document.getElementById('situacaoIR').value = 'manual';
-        alternarIR();
-        document.getElementById('descIRRF').value = fmtCentsPlain(parseMoney(g('cfh_irrf').value));
+      // Situação do IR escolhida na conferência (nunca cai no "auto" sem querer)
+      const sitIR = g('cfh_sitIR') ? g('cfh_sitIR').value : 'manual';
+      document.getElementById('situacaoIR').value = sitIR;
+      alternarIR();
+      if (sitIR === 'manual') {
+        document.getElementById('descIRRF').value =
+          g('cfh_irrf').value !== '' ? fmtCentsPlain(parseMoney(g('cfh_irrf').value)) : '';
       }
       let n = 0;
       (d.consignados || []).forEach((c, i) => {
