@@ -1456,8 +1456,216 @@ def admin_logout():
     return redirect(url_for("admin_login"))
 
 
+# ---- Layout do admin (menu lateral compartilhado) ----
+ADMIN_SHELL = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{{TITULO}} · Repactua Admin</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+body{background:#eef1f6;color:#1c2b3a;display:flex;min-height:100vh}
+aside{width:225px;background:#13283e;color:#fff;position:fixed;top:0;bottom:0;left:0;display:flex;flex-direction:column}
+.s-logo{display:flex;align-items:center;gap:10px;padding:18px;border-bottom:1px solid rgba(255,255,255,.08);font-weight:700}
+.s-logo small{display:block;font-weight:400;opacity:.7;font-size:.7rem}
+nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:4px}
+.item{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.85);text-decoration:none;padding:10px 12px;border-radius:8px;font-size:.9rem;font-weight:600}
+.item:hover{background:rgba(255,255,255,.08)}
+.item.ativo{background:#c8960c;color:#13283e}
+.s-user{padding:14px 18px;border-top:1px solid rgba(255,255,255,.08);font-size:.74rem;opacity:.9;word-break:break-all}
+.s-user a{color:#f0b429;text-decoration:none;font-weight:700}
+main{flex:1;margin-left:225px;padding:26px 30px;max-width:calc(100% - 225px)}
+h1{color:#1a3a5c;font-size:1.35rem;margin-bottom:2px}
+h2{color:#1a3a5c;font-size:1rem;margin:20px 0 10px}
+.sub{color:#5a6a7a;font-size:.86rem;margin-bottom:18px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:13px;margin-bottom:14px}
+.mc{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:15px 17px}
+.mc .lbl{font-size:.7rem;text-transform:uppercase;letter-spacing:.4px;color:#5a6a7a;margin-bottom:5px}
+.mc .val{font-size:1.5rem;font-weight:700;color:#1a3a5c}
+.mc .det{font-size:.72rem;color:#8a97a5;margin-top:3px}
+.mc.verde{border-left:4px solid #1e7e34}.mc.verde .val{color:#1e7e34}
+.mc.ouro{border-left:4px solid #c8960c}.mc.ouro .val{color:#9a6700}
+.mc.rubi .val{color:#a3271a}
+.painel{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:16px}
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media(max-width:1000px){.duas{grid-template-columns:1fr}}
+@media(max-width:820px){body{flex-direction:column}aside{position:static;width:100%;flex-direction:row;align-items:center}nav{flex-direction:row;overflow-x:auto;padding:8px}.s-user{display:none}main{margin-left:0;max-width:100%;padding:18px}}
+table{width:100%;border-collapse:collapse;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06);border-radius:10px;overflow:hidden}
+th{background:#1a3a5c;color:#fff;padding:10px 11px;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.4px}
+td{padding:10px 11px;border-bottom:1px solid #eef1f5;font-size:.87rem;vertical-align:top}
+tr:hover td{background:#fafbfd}
+td a{color:#1a3a5c;text-decoration:none;font-size:.8rem;font-weight:600} td a:hover{color:#c8960c}
+small{color:#8a97a5;font-weight:400}
+.badge{padding:3px 11px;border-radius:20px;font-size:.74rem;font-weight:700;white-space:nowrap}
+.b-ativo{background:#e9f7ee;color:#1b5e20}.b-trial{background:#fff4e0;color:#9a6700}.b-inativo{background:#fdecea;color:#7a2218}
+.busca{width:100%;max-width:340px;padding:10px 14px;border:1.5px solid #d0d7e2;border-radius:8px;font-size:.9rem;background:#fff;margin-bottom:10px}
+.btn-x{background:#fdecea;color:#a3271a;border:none;border-radius:6px;padding:4px 10px;font-size:.76rem;font-weight:700;cursor:pointer}
+.btn-x:hover{background:#a3271a;color:#fff}
+.nota{font-size:.76rem;color:#8a97a5;margin-top:10px}
+</style></head><body>
+<aside>
+  <div class="s-logo">{{LOGO}} <div>Repactua<small>Painel Master</small></div></div>
+  <nav>{{MENU}}</nav>
+  <div class="s-user">{{ADMIN_EMAIL}}<br><a href="/admin/logout">Sair ↪</a></div>
+</aside>
+<main>{{CONTEUDO}}</main>
+{{JS}}</body></html>"""
+
+
+def _admin_page(titulo, conteudo, ativo="dash", extra_js=""):
+    itens = [
+        ("dash", "/admin", "📊", "Dashboard"),
+        ("assin", "/admin/assinantes", "👥", "Assinantes"),
+        ("fin", "/admin/financeiro", "💰", "Financeiro"),
+        ("sub", "/admin/subconta", "🏦", "Subconta"),
+        ("wh", "/admin/configurar-webhook", "🔗", "Webhook"),
+        ("calc", "/calculadora", "🧮", "Calculadora"),
+    ]
+    menu = "".join(
+        f'<a class="item{" ativo" if k == ativo else ""}" href="{h}"><span>{ic}</span>{lb}</a>'
+        for k, h, ic, lb in itens)
+    email = session.get("admin_email") or (current_user.email if current_user.is_authenticated else "admin")
+    html = (ADMIN_SHELL
+            .replace("{{TITULO}}", titulo)
+            .replace("{{MENU}}", menu)
+            .replace("{{LOGO}}", logo_repactua(30))
+            .replace("{{ADMIN_EMAIL}}", email)
+            .replace("{{CONTEUDO}}", conteudo)
+            .replace("{{JS}}", extra_js))
+    return Response(html, mimetype="text/html")
+
+
+def _serie_6_meses(por_mes):
+    """(labels, valores) dos últimos 6 meses a partir de um dict {'AAAA-MM': valor}."""
+    MESES_PT = ["jan", "fev", "mar", "abr", "mai", "jun",
+                "jul", "ago", "set", "out", "nov", "dez"]
+    hoje = date.today()
+    ano, mes = hoje.year, hoje.month
+    chaves = []
+    for _ in range(6):
+        chaves.append((ano, mes))
+        mes -= 1
+        if mes == 0:
+            mes, ano = 12, ano - 1
+    labels, valores = [], []
+    for a, m in reversed(chaves):
+        labels.append(f"{MESES_PT[m-1]}/{str(a)[2:]}")
+        valores.append(round(por_mes.get(f"{a:04d}-{m:02d}", 0), 2))
+    return labels, valores
+
+
 @app.route("/admin")
 def admin():
+    """Dashboard: visão geral do negócio (receita, contas, uso de IA, casos)."""
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    mes_atual = datetime.utcnow().strftime("%Y-%m")
+    orgs = Escritorio.query.all()
+    ativos = sum(1 for o in orgs if o.status == "ativo")
+    trials = sum(1 for o in orgs if o.status == "trial")
+    inativos = sum(1 for o in orgs if o.status not in ("ativo", "trial"))
+    pagantes = sum(1 for o in orgs if o.status == "ativo" and o.asaas_subscription_id)
+    cortesias = ativos - pagantes
+    mrr = sum(PLANOS.get(o.plano, {}).get("valor", 0)
+              for o in orgs if o.status == "ativo" and o.asaas_subscription_id)
+    uso_ia = db.session.query(db.func.sum(User.usage_contagem)).filter(
+        User.usage_mes == mes_atual).scalar() or 0
+    total_casos = Caso.query.count()
+    total_users = User.query.count()
+
+    # receita real (Asaas)
+    pags = _pagamentos_repactua()
+    RECEBIDO = ("RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH")
+    receb_mes = receb_total = a_receber = 0.0
+    receita_por_mes = {}
+    for p in pags:
+        v = float(p.get("value") or 0)
+        st = p.get("status") or ""
+        dt = (p.get("clientPaymentDate") or p.get("paymentDate")
+              or p.get("confirmedDate") or p.get("dueDate") or "")[:7]
+        if st in RECEBIDO:
+            receb_total += v
+            receita_por_mes[dt] = receita_por_mes.get(dt, 0) + v
+            if dt == mes_atual:
+                receb_mes += v
+        elif st in ("PENDING", "OVERDUE"):
+            a_receber += v
+
+    # novos cadastros por mês (contas)
+    cad_por_mes = {}
+    for o in orgs:
+        k = (o.criado_em or datetime.utcnow()).strftime("%Y-%m")
+        cad_por_mes[k] = cad_por_mes.get(k, 0) + 1
+    lab_r, val_r = _serie_6_meses(receita_por_mes)
+    lab_c, val_c = _serie_6_meses(cad_por_mes)
+
+    # últimos cadastros
+    recentes = Escritorio.query.order_by(Escritorio.criado_em.desc()).limit(5).all()
+    linhas_rec = ""
+    for o in recentes:
+        dono = next((u for u in (o.usuarios or []) if u.papel == "dono"), None) or \
+               (o.usuarios[0] if o.usuarios else None)
+        cls = {"ativo": "b-ativo", "trial": "b-trial"}.get(o.status, "b-inativo")
+        sit = {"ativo": "Em dia", "trial": "Em teste"}.get(o.status, "Inativo")
+        linhas_rec += f"""<tr>
+          <td><b>{o.nome or '—'}</b><br><small>{dono.email if dono else '—'}</small></td>
+          <td>{PLANOS.get(o.plano, {}).get('nome', o.plano or '—')}</td>
+          <td><span class="badge {cls}">{sit}</span></td>
+          <td>{(o.criado_em or datetime.utcnow()).strftime('%d/%m/%Y')}</td></tr>"""
+    if not linhas_rec:
+        linhas_rec = '<tr><td colspan="4" style="color:#8a97a5">Nenhuma conta ainda.</td></tr>'
+
+    def moeda(v):
+        return ("R$ %.2f" % v).replace(".", ",")
+
+    conteudo = f"""
+    <h1>Dashboard</h1>
+    <div class="sub">Visão geral do Repactua · {datetime.utcnow().strftime('%d/%m/%Y')}</div>
+    <div class="cards">
+      <div class="mc verde"><div class="lbl">Recebido este mês</div><div class="val">{moeda(receb_mes)}</div></div>
+      <div class="mc verde"><div class="lbl">Recebido (total)</div><div class="val">{moeda(receb_total)}</div></div>
+      <div class="mc ouro"><div class="lbl">A receber</div><div class="val">{moeda(a_receber)}</div></div>
+      <div class="mc"><div class="lbl">MRR</div><div class="val">{moeda(mrr)}</div><div class="det">{pagantes} pagante(s)</div></div>
+    </div>
+    <div class="cards">
+      <div class="mc"><div class="lbl">Contas ativas</div><div class="val">{ativos}</div><div class="det">{pagantes} pagas · {cortesias} cortesia</div></div>
+      <div class="mc ouro"><div class="lbl">Em teste</div><div class="val">{trials}</div></div>
+      <div class="mc rubi"><div class="lbl">Inativas</div><div class="val">{inativos}</div></div>
+      <div class="mc"><div class="lbl">Usuários (logins)</div><div class="val">{total_users}</div></div>
+      <div class="mc"><div class="lbl">Consultas IA no mês</div><div class="val">{uso_ia}</div></div>
+      <div class="mc"><div class="lbl">Casos salvos</div><div class="val">{total_casos}</div></div>
+    </div>
+    <div class="duas">
+      <div><h2>📈 Receita recebida (6 meses)</h2>
+        <div class="painel"><canvas id="grafReceita" height="200"></canvas></div></div>
+      <div><h2>🆕 Novas contas (6 meses)</h2>
+        <div class="painel"><canvas id="grafContas" height="200"></canvas></div></div>
+    </div>
+    <h2>🕘 Últimos cadastros</h2>
+    <table><thead><tr><th>Conta</th><th>Plano</th><th>Situação</th><th>Cadastro</th></tr></thead>
+    <tbody>{linhas_rec}</tbody></table>
+    <p class="nota">Receita = pagamentos reais do Asaas com "Repactua" na descrição. MRR considera apenas assinaturas pagas ativas.</p>"""
+
+    js = """
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+    new Chart(document.getElementById('grafReceita'), { type: 'bar',
+      data: { labels: %s, datasets: [{ data: %s, backgroundColor: '#1a3a5c',
+        hoverBackgroundColor: '#c8960c', borderRadius: 6 }] },
+      options: { plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { callback: function(v){ return 'R$ ' + v; } } } } } });
+    new Chart(document.getElementById('grafContas'), { type: 'line',
+      data: { labels: %s, datasets: [{ data: %s, borderColor: '#c8960c',
+        backgroundColor: 'rgba(200,150,12,.15)', fill: true, tension: .35, pointRadius: 4,
+        pointBackgroundColor: '#1a3a5c' }] },
+      options: { plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } } });
+    </script>""" % (json.dumps(lab_r), json.dumps(val_r), json.dumps(lab_c), json.dumps(val_c))
+
+    return _admin_page("Dashboard", conteudo, "dash", js)
+
+
+@app.route("/admin/assinantes")
+def admin_assinantes():
+    """Gestão de assinantes: status, plano, admins e exclusão."""
     if not _admin_logado():
         return redirect(url_for("admin_login"))
     users = User.query.order_by(User.criado_em.desc()).all()
@@ -1474,12 +1682,18 @@ def admin():
             extra = ""
         uso_mes = (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime('%Y-%m') else 0
         selo_admin = ' <span style="background:#1a3a5c;color:#f0b429;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:700">ADMIN</span>' if u.is_admin else ''
-        # protege o admin principal e o próprio admin logado de serem rebaixados
         protegido = (u.email == ADMIN_EMAIL) or (u.email == session.get("admin_email"))
         if u.is_admin:
-            link_admin = '<span style="color:#aaa">admin protegido</span>' if protegido else f'<a href="/admin/admin/{u.id}/0">remover admin</a>'
+            link_admin = '<span style="color:#aaa;font-size:.8rem">admin protegido</span>' if protegido else f'<a href="/admin/admin/{u.id}/0">remover admin</a>'
         else:
             link_admin = f'<a href="/admin/admin/{u.id}/1">tornar admin</a>'
+        if protegido:
+            botao_excluir = ""
+        else:
+            alvo = "a CONTA INTEIRA (escritório, membros e casos)" if papel == "dono" else "este login"
+            botao_excluir = (f'<form method="post" action="/admin/excluir/{u.id}" style="display:inline" '
+                             f"onsubmit=\"return confirm('EXCLUIR {u.email}? Isso apaga {alvo}. Não pode ser desfeito.')\">"
+                             f'<button class="btn-x">🗑 excluir</button></form>')
         linhas += f"""<tr>
           <td>{u.nome or '—'}{selo_admin}<br><small>{u.email}</small></td>
           <td>{u.escritorio or '—'}<br><small>{plano} · {papel}</small>{extra}</td>
@@ -1491,38 +1705,45 @@ def admin():
             <a href="/admin/status/{u.id}/trial">trial</a><br>
             <a href="/admin/plano/{u.id}/escritorio">→ escritório (cortesia)</a> ·
             <a href="/admin/plano/{u.id}/individual">→ individual</a><br>
-            {link_admin}
+            {link_admin} &nbsp; {botao_excluir}
           </td></tr>"""
-    html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel · Repactua</title><style>
-    *{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}}
-    body{{background:#f4f6f9;color:#1c2b3a}}
-    .barra{{background:#1a3a5c;color:#fff;padding:12px 28px;display:flex;align-items:center;justify-content:space-between}}
-    .barra .marca{{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05rem}}
-    .barra .marca small{{display:block;font-weight:400;opacity:.75;font-size:.72rem}}
-    .barra a{{color:#fff;text-decoration:none;font-size:.85rem;opacity:.9;margin-left:16px}}
-    .barra a:hover{{opacity:1;color:#f0b429}}
-    .wrap{{max-width:1100px;margin:0 auto;padding:24px}}
-    h1{{color:#1a3a5c;font-size:1.3rem;margin-bottom:4px}}
-    .sub{{color:#5a6a7a;font-size:.85rem;margin-bottom:16px}}
-    table{{width:100%;border-collapse:collapse;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.07);border-radius:10px;overflow:hidden}}
-    th{{background:#1a3a5c;color:#fff;padding:11px;text-align:left;font-size:.76rem;text-transform:uppercase;letter-spacing:.4px}}
-    td{{padding:11px;border-bottom:1px solid #eef1f5;font-size:.88rem;vertical-align:top}}
-    tr:hover td{{background:#fafbfd}}
-    a{{color:#1a3a5c;text-decoration:none;font-size:.82rem;font-weight:600}} a:hover{{color:#c8960c}}
-    small{{color:#8a97a5;font-weight:400}}</style></head><body>
-    <div class="barra">
-      <div class="marca">{logo_repactua(30)} <div>Repactua<small>Painel administrativo</small></div></div>
-      <div><a href="/admin/financeiro">Financeiro</a><a href="/admin/subconta">Criar subconta</a><a href="/calculadora">← Calculadora</a><a href="/admin/logout">Sair do admin ↪</a></div>
-    </div>
-    <div class="wrap">
-      <h1>Assinantes</h1>
-      <div class="sub">{len(users)} conta(s) cadastrada(s)</div>
-      <table><thead><tr><th>Advogado</th><th>Escritório / plano</th><th>Status</th><th>Uso/mês</th><th>Ações</th></tr></thead>
-      <tbody>{linhas}</tbody></table>
-    </div></body></html>"""
-    return Response(html, mimetype="text/html")
+    conteudo = f"""
+    <h1>Assinantes</h1>
+    <div class="sub">{len(users)} login(s) cadastrado(s)</div>
+    <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, plano...">
+    <table><thead><tr><th>Advogado</th><th>Escritório / plano</th><th>Status</th><th>Uso/mês</th><th>Ações</th></tr></thead>
+    <tbody id="tbAssinantes">{linhas}</tbody></table>
+    <p class="nota">Excluir um <b>dono</b> apaga o escritório inteiro (membros e casos). Excluir um <b>membro</b> apaga só aquele login. Admins protegidos não podem ser excluídos.</p>"""
+    js = """<script>
+    function filtrarTabela() {
+      var q = document.getElementById('busca').value.toLowerCase();
+      document.querySelectorAll('#tbAssinantes tr').forEach(function(tr) {
+        tr.style.display = tr.textContent.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    }
+    </script>"""
+    return _admin_page("Assinantes", conteudo, "assin", js)
+
+
+@app.route("/admin/excluir/<int:uid>", methods=["POST"])
+def admin_excluir(uid):
+    """Exclui um login (membro) ou a conta inteira (dono: escritório+membros+casos)."""
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    u = db.session.get(User, uid)
+    if not u or u.email == ADMIN_EMAIL or u.email == session.get("admin_email"):
+        return redirect(url_for("admin_assinantes"))
+    org = u.org
+    if (u.papel or "dono") == "dono" and org:
+        Caso.query.filter_by(org_id=org.id).delete()
+        for m in list(org.usuarios or []):
+            db.session.delete(m)
+        db.session.delete(org)
+    else:
+        Caso.query.filter_by(user_id=u.id).update({"user_id": None})
+        db.session.delete(u)
+    db.session.commit()
+    return redirect(url_for("admin_assinantes"))
 
 
 @app.route("/admin/status/<int:uid>/<novo>")
@@ -1535,7 +1756,7 @@ def admin_status(uid, novo):
         if u.org:
             u.org.status = novo    # fonte de verdade
         db.session.commit()
-    return redirect(url_for("admin"))
+    return redirect(url_for("admin_assinantes"))
 
 
 @app.route("/admin/admin/<int:uid>/<int:val>")
@@ -1552,7 +1773,7 @@ def admin_set_admin(uid, val):
             if u.email != ADMIN_EMAIL and u.email != session.get("admin_email"):
                 u.is_admin = False
         db.session.commit()
-    return redirect(url_for("admin"))
+    return redirect(url_for("admin_assinantes"))
 
 
 @app.route("/admin/plano/<int:uid>/<plano>")
@@ -1574,7 +1795,7 @@ def admin_plano(uid, plano):
         else:
             u.cota_mensal = 50
         db.session.commit()
-    return redirect(url_for("admin"))
+    return redirect(url_for("admin_assinantes"))
 
 
 @app.route("/admin/subconta", methods=["GET", "POST"])
@@ -1830,40 +2051,8 @@ def admin_financeiro():
     }
     </script>""" % (json.dumps(labels), json.dumps(valores))
 
-    html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Financeiro · Repactua</title><style>
-    *{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}}
-    body{{background:#f4f6f9;color:#1c2b3a}}
-    .barra{{background:#1a3a5c;color:#fff;padding:12px 28px;display:flex;align-items:center;justify-content:space-between}}
-    .barra .marca{{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05rem}}
-    .barra .marca small{{display:block;font-weight:400;opacity:.75;font-size:.72rem}}
-    .barra a{{color:#fff;text-decoration:none;font-size:.85rem;opacity:.9;margin-left:16px}} .barra a:hover{{color:#f0b429}}
-    .wrap{{max-width:1160px;margin:0 auto;padding:24px}}
-    h1{{color:#1a3a5c;font-size:1.4rem;margin-bottom:2px}} .sub{{color:#5a6a7a;font-size:.88rem;margin-bottom:18px}}
-    h2{{color:#1a3a5c;font-size:1.02rem;margin:22px 0 10px}}
-    .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:6px}}
-    .mc{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:16px 18px}}
-    .mc .lbl{{font-size:.72rem;text-transform:uppercase;letter-spacing:.4px;color:#5a6a7a;margin-bottom:6px}}
-    .mc .val{{font-size:1.55rem;font-weight:700;color:#1a3a5c}}
-    .mc.verde{{border-left:4px solid #1e7e34}} .mc.verde .val{{color:#1e7e34}}
-    .mc.ouro{{border-left:4px solid #c8960c}} .mc.ouro .val{{color:#9a6700}}
-    .mc.emteste .val{{color:#c8960c}} .mc.inativo .val{{color:#a3271a}}
-    .painel{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:18px}}
-    table{{width:100%;border-collapse:collapse;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.07);border-radius:10px;overflow:hidden}}
-    th{{background:#1a3a5c;color:#fff;padding:11px;text-align:left;font-size:.74rem;text-transform:uppercase;letter-spacing:.4px}}
-    td{{padding:11px;border-bottom:1px solid #eef1f5;font-size:.88rem}} tr:hover td{{background:#fafbfd}}
-    small{{color:#8a97a5}}
-    .badge{{padding:3px 12px;border-radius:20px;font-size:.76rem;font-weight:700}}
-    .b-ativo{{background:#e9f7ee;color:#1b5e20}}.b-trial{{background:#fff4e0;color:#9a6700}}.b-inativo{{background:#fdecea;color:#7a2218}}
-    .busca{{width:100%;max-width:340px;padding:10px 14px;border:1.5px solid #d0d7e2;border-radius:8px;font-size:.9rem;background:#fff;margin-bottom:10px}}
-    .duas{{display:grid;grid-template-columns:1.1fr .9fr;gap:16px;align-items:start}}
-    @media(max-width:900px){{.duas{{grid-template-columns:1fr}}}}</style></head>
-    <body><div class="barra">
-      <div class="marca">{logo_repactua(30)} <div>Repactua<small>Painel financeiro</small></div></div>
-      <div><a href="/admin">← Assinantes</a><a href="/admin/logout">Sair do admin ↪</a></div>
-    </div>
-    <div class="wrap">
-      <h1>Financeiro do Repactua</h1>
+    conteudo = f"""
+      <h1>Financeiro</h1>
       <div class="sub">Receita real (Asaas) e situação das assinaturas</div>
       <div class="cards">
         <div class="mc verde"><div class="lbl">Recebido este mês</div><div class="val">{fmt_moeda(receb_mes)}</div></div>
@@ -1874,8 +2063,8 @@ def admin_financeiro():
       <div class="cards">
         <div class="mc"><div class="lbl">Pagantes</div><div class="val">{pagantes}</div></div>
         <div class="mc"><div class="lbl">Em dia</div><div class="val">{ativos}</div></div>
-        <div class="mc emteste"><div class="lbl">Em teste</div><div class="val">{trials}</div></div>
-        <div class="mc inativo"><div class="lbl">Inativos</div><div class="val">{inativos}</div></div>
+        <div class="mc ouro"><div class="lbl">Em teste</div><div class="val">{trials}</div></div>
+        <div class="mc rubi"><div class="lbl">Inativos</div><div class="val">{inativos}</div></div>
       </div>
 
       <div class="duas">
@@ -1894,9 +2083,8 @@ def admin_financeiro():
       <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, cidade...">
       <table><thead><tr><th>Assinante</th><th>Situação</th><th>Valor</th><th>Plano</th><th>Membros</th><th>Contato</th><th>Cidade</th><th>Cadastro</th></tr></thead>
       <tbody id="tbAssinantes">{linhas}</tbody></table>
-      <p style="font-size:.78rem;color:#8a97a5;margin-top:12px">Recebido/A receber = pagamentos reais do Asaas com "Repactua" na descrição. MRR = soma dos planos <b>pagos</b> ativos (cortesias não entram). "Em dia" conta todos os ativos, inclusive cortesias.</p>
-    </div>{grafico_js}</body></html>"""
-    return Response(html, mimetype="text/html")
+      <p class="nota">Recebido/A receber = pagamentos reais do Asaas com "Repactua" na descrição. MRR = soma dos planos <b>pagos</b> ativos (cortesias não entram). "Em dia" conta todos os ativos, inclusive cortesias.</p>"""
+    return _admin_page("Financeiro", conteudo, "fin", grafico_js)
 
 
 @app.route("/admin/configurar-webhook", methods=["GET", "POST"])
