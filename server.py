@@ -142,6 +142,9 @@ class Escritorio(db.Model):
     max_membros = db.Column(db.Integer, default=1)
     creditos_total = db.Column(db.Integer, default=50)  # pool de consultas/mês do escritório
     timbre = db.Column(db.Text)  # JSON do timbre da petição (compartilhado pelo escritório)
+    telefone = db.Column(db.String(30))
+    cidade = db.Column(db.String(120))
+    uf = db.Column(db.String(4))
     criado_em = db.Column(db.DateTime, default=datetime.utcnow)
 
     usuarios = db.relationship("User", backref="org", lazy=True,
@@ -251,6 +254,9 @@ def _migrar_schema():
         'ALTER TABLE escritorio ADD COLUMN creditos_total INTEGER',
         'ALTER TABLE escritorio ADD COLUMN timbre TEXT',
         'ALTER TABLE escritorio ADD COLUMN asaas_subscription_id VARCHAR(120)',
+        'ALTER TABLE escritorio ADD COLUMN telefone VARCHAR(30)',
+        'ALTER TABLE escritorio ADD COLUMN cidade VARCHAR(120)',
+        'ALTER TABLE escritorio ADD COLUMN uf VARCHAR(4)',
     ):
         try:
             db.session.execute(text(ddl))
@@ -991,6 +997,9 @@ def assinar_post():
         org.plano = plano
         org.max_membros = PLANOS[plano]["max_membros"]
         org.creditos_total = PLANOS[plano]["pool"]
+        org.telefone = (request.form.get("telefone") or "").strip() or org.telefone
+        org.cidade = (request.form.get("cidade") or "").strip() or org.cidade
+        org.uf = (request.form.get("uf") or "").strip().upper() or org.uf
         # cota do dono: Individual = 50; Escritório = pool inteiro (gestor redistribui aos membros)
         if plano == "escritorio":
             outros = sum((m.cota_mensal or 0) for m in org.usuarios if m.id != current_user.id)
@@ -1672,11 +1681,15 @@ def admin_financeiro():
     orgs = Escritorio.query.order_by(Escritorio.criado_em.desc()).all()
     mrr = ativos = trials = inativos = 0
     linhas = ""
+    pagantes = 0
     for o in orgs:
         valor = PLANOS.get(o.plano, {}).get("valor", 0)
+        pago = bool(o.asaas_subscription_id)  # tem assinatura de verdade (não cortesia)
         if o.status == "ativo":
             ativos += 1
-            mrr += valor
+            if pago:
+                mrr += valor
+                pagantes += 1
         elif o.status == "trial":
             trials += 1
         else:
@@ -1690,12 +1703,17 @@ def admin_financeiro():
         cadastro = (o.criado_em or datetime.utcnow()).strftime("%d/%m/%Y")
         cls = {"ativo": "b-ativo", "trial": "b-trial", "inativo": "b-inativo"}.get(o.status, "b-trial")
         sit = {"ativo": "Em dia", "trial": "Em teste", "inativo": "Inativo"}.get(o.status, o.status)
+        tag_cortesia = '<br><small style="color:#c8960c">cortesia</small>' if (o.status == "ativo" and not pago) else ""
+        contato = o.telefone or "—"
+        cidade = (o.cidade + ("/" + o.uf if o.uf else "")) if o.cidade else "—"
         linhas += f"""<tr>
           <td><b>{nome}</b><br><small>{email}</small></td>
-          <td><span class="badge {cls}">{sit}</span></td>
+          <td><span class="badge {cls}">{sit}</span>{tag_cortesia}</td>
           <td>{valor_fmt}</td>
           <td>{plano_nome}</td>
           <td>{o.total_membros}/{o.max_membros}</td>
+          <td>{contato}</td>
+          <td>{cidade}</td>
           <td>{cadastro}</td></tr>"""
     mrr_fmt = ("R$ %.2f" % mrr).replace(".", ",")
 
@@ -1730,14 +1748,14 @@ def admin_financeiro():
       <div class="sub">Situação da assinatura e receita recorrente</div>
       <div class="cards">
         <div class="mc mrr"><div class="lbl">Receita mensal (MRR)</div><div class="val">{mrr_fmt}</div></div>
-        <div class="mc"><div class="lbl">Total de contas</div><div class="val">{len(orgs)}</div></div>
+        <div class="mc"><div class="lbl">Pagantes</div><div class="val">{pagantes}</div></div>
         <div class="mc"><div class="lbl">Em dia</div><div class="val">{ativos}</div></div>
         <div class="mc emteste"><div class="lbl">Em teste</div><div class="val">{trials}</div></div>
         <div class="mc inativo"><div class="lbl">Inativos</div><div class="val">{inativos}</div></div>
       </div>
-      <table><thead><tr><th>Assinante</th><th>Situação</th><th>Valor</th><th>Plano</th><th>Membros</th><th>Cadastro</th></tr></thead>
+      <table><thead><tr><th>Assinante</th><th>Situação</th><th>Valor</th><th>Plano</th><th>Membros</th><th>Contato</th><th>Cidade</th><th>Cadastro</th></tr></thead>
       <tbody>{linhas}</tbody></table>
-      <p style="font-size:.78rem;color:#8a97a5;margin-top:12px">MRR estimado pela soma dos planos ativos. Contas de cortesia (sem cobrança) também contam como ativas.</p>
+      <p style="font-size:.78rem;color:#8a97a5;margin-top:12px">MRR = soma apenas das assinaturas <b>pagas</b> ativas (contas de cortesia não entram na receita). "Em dia" conta todos os ativos, inclusive cortesias.</p>
     </div></body></html>"""
     return Response(html, mimetype="text/html")
 
