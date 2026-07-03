@@ -23,7 +23,11 @@ import json
 import os
 import urllib.request
 import urllib.error
-from datetime import datetime, date
+import csv
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from datetime import datetime, date, timedelta
 from functools import wraps
 
 from flask import (
@@ -91,6 +95,33 @@ NF_DEDUCOES = float(os.environ.get("NF_DEDUCOES", "0") or 0)
 NF_OBSERVACOES = os.environ.get("NF_OBSERVACOES", "")
 NF_QUANDO = os.environ.get("NF_QUANDO", "ON_PAYMENT_CONFIRMATION")
 
+# --- Alertas por e-mail para o admin (opcional; ativa ao definir SMTP_HOST) ---
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or 587)
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER)
+ALERTA_EMAIL = os.environ.get("ALERTA_EMAIL", "")  # destino dos avisos (padrão: ADMIN_EMAIL)
+
+
+def _enviar_email(assunto, corpo, para=None):
+    """Envia e-mail de alerta. Silencioso se SMTP não configurado ou em erro."""
+    if not SMTP_HOST:
+        return False
+    try:
+        msg = MIMEText(corpo, "plain", "utf-8")
+        msg["Subject"] = assunto
+        msg["From"] = SMTP_FROM
+        msg["To"] = para or ALERTA_EMAIL or ADMIN_EMAIL
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+            s.starttls()
+            if SMTP_USER:
+                s.login(SMTP_USER, SMTP_PASS)
+            s.send_message(msg)
+        return True
+    except Exception:
+        return False
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -145,6 +176,7 @@ class Escritorio(db.Model):
     telefone = db.Column(db.String(30))
     cidade = db.Column(db.String(120))
     uf = db.Column(db.String(4))
+    acesso_ate = db.Column(db.Date)  # validade do período pago (NULL = sem expiração/cortesia)
     criado_em = db.Column(db.DateTime, default=datetime.utcnow)
 
     usuarios = db.relationship("User", backref="org", lazy=True,
@@ -194,7 +226,11 @@ class User(UserMixin, db.Model):
     def status_efetivo(self):
         """Status que vale para o usuário = status do escritório (fallback no legado)."""
         if self.org:
-            return self.org.status
+            st = self.org.status
+            # período pago expirou (ex.: assinatura cancelada) → perde o acesso
+            if st == "ativo" and self.org.acesso_ate and self.org.acesso_ate < date.today():
+                return "inativo"
+            return st
         return self.status or "trial"
 
     @property
@@ -222,6 +258,26 @@ class User(UserMixin, db.Model):
             self.usage_contagem = 0
         self.usage_contagem = (self.usage_contagem or 0) + 1
         db.session.commit()
+
+
+class LogAdmin(db.Model):
+    """Auditoria das ações administrativas."""
+    __tablename__ = "log_admin"
+    id = db.Column(db.Integer, primary_key=True)
+    quando = db.Column(db.DateTime, default=datetime.utcnow)
+    admin_email = db.Column(db.String(255))
+    acao = db.Column(db.String(255))
+    alvo = db.Column(db.String(255))
+
+
+def _log_admin(acao, alvo=""):
+    try:
+        email = session.get("admin_email") or (
+            current_user.email if current_user.is_authenticated else "?")
+        db.session.add(LogAdmin(admin_email=email, acao=acao, alvo=str(alvo)[:255]))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 class Caso(db.Model):
@@ -257,6 +313,7 @@ def _migrar_schema():
         'ALTER TABLE escritorio ADD COLUMN telefone VARCHAR(30)',
         'ALTER TABLE escritorio ADD COLUMN cidade VARCHAR(120)',
         'ALTER TABLE escritorio ADD COLUMN uf VARCHAR(4)',
+        'ALTER TABLE escritorio ADD COLUMN acesso_ate DATE',
     ):
         try:
             db.session.execute(text(ddl))
@@ -562,6 +619,9 @@ def pagina_signup():
                 user.is_admin = True
             db.session.add(user)
             db.session.commit()
+            _enviar_email("🆕 Repactua: novo cadastro",
+                          f"Nova conta criada: {nome or email} <{email}>"
+                          f"{' · escritório: ' + escritorio if escritorio else ''}")
             login_user(user, remember=True)
             return redirect(url_for("index"))
     corpo = f"""<h2>Criar conta</h2><div class="sub">Comece com algumas consultas de teste gratuitas.</div>{msg}
@@ -1150,6 +1210,17 @@ def _badge(status):
     return f'<span class="badge {cls}">{status.upper()}</span>'
 
 
+def _bloco_cancelar(u, org):
+    """Link discreto de cancelamento (dono com assinatura paga ativa)."""
+    if not org or u.papel != "dono" or not org.asaas_subscription_id:
+        return ""
+    return ('<form method="post" action="/conta/cancelar" style="margin-top:14px;text-align:right" '
+            'onsubmit="return confirm(\'Cancelar a assinatura? Não haverá novas cobranças e o acesso '
+            'continua até o fim do período já pago.\')">'
+            '<button type="submit" style="background:none;border:none;color:#a3271a;font-size:.78rem;'
+            'cursor:pointer;text-decoration:underline">Cancelar assinatura</button></form>')
+
+
 def _bloco_upgrade(u, plano):
     """CTA de upgrade para Escritório, mostrado ao dono de um plano Individual."""
     if plano != "individual" or u.papel != "dono":
@@ -1187,6 +1258,7 @@ def render_conta(msg_ok="", msg_erro=""):
       <div class="muted" style="margin-top:8px">As consultas renovam todo mês.{' ' if u.status_efetivo=='ativo' else ' Assine para liberar 50/mês.'}</div>
       {'' if u.status_efetivo=='ativo' else '<div class="row" style="margin-top:10px"><a class="btn" href="/assinar" style="text-decoration:none">Assinar agora →</a></div>'}
       {_bloco_upgrade(u, plano)}
+      {_bloco_cancelar(u, org)}
     </div>"""
 
     bloco_equipe = ""
@@ -1370,6 +1442,31 @@ def _trocar_plano_assinatura(org, novo_plano):
     org.creditos_total = PLANOS[novo_plano]["pool"]
 
 
+@app.route("/conta/cancelar", methods=["POST"])
+@login_required
+def conta_cancelar():
+    """Cliente cancela a assinatura: para as cobranças; acesso vale até o fim do período pago."""
+    org = current_user.org
+    if not org or current_user.papel != "dono":
+        return render_conta(msg_erro="Apenas o dono da conta pode cancelar a assinatura.")
+    sub_id = org.asaas_subscription_id
+    if not sub_id:
+        return render_conta(msg_erro="Não há assinatura paga para cancelar nesta conta.")
+    try:
+        asaas("DELETE", "/subscriptions/%s" % sub_id)
+    except Exception:
+        pass  # se já estava cancelada no Asaas, segue
+    org.asaas_subscription_id = None
+    if not org.acesso_ate:
+        org.acesso_ate = date.today() + timedelta(days=30)
+    db.session.commit()
+    _enviar_email("🚫 Repactua: assinatura cancelada",
+                  f"O cliente {org.nome or current_user.email} cancelou a assinatura. "
+                  f"Acesso válido até {org.acesso_ate.strftime('%d/%m/%Y')}.")
+    return render_conta(msg_ok=f"Assinatura cancelada. Não haverá novas cobranças, e seu acesso "
+                               f"continua até {org.acesso_ate.strftime('%d/%m/%Y')}.")
+
+
 @app.route("/conta/upgrade", methods=["POST"])
 @login_required
 def conta_upgrade():
@@ -1408,10 +1505,18 @@ def asaas_webhook():
     if org:
         if tipo in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
             org.status = "ativo"
+            org.acesso_ate = date.today() + timedelta(days=37)  # 1 mês + folga
             if cust_id and not org.asaas_customer_id:
                 org.asaas_customer_id = cust_id
+            _enviar_email(
+                "💰 Repactua: pagamento recebido",
+                f"Pagamento confirmado de {org.nome or email or cust_id} "
+                f"(R$ {pagamento.get('value', '?')}) — conta ativada/renovada.")
         elif tipo in ("PAYMENT_OVERDUE", "PAYMENT_DELETED", "PAYMENT_REFUNDED", "SUBSCRIPTION_DELETED"):
             org.status = "inativo"
+            _enviar_email(
+                "⚠️ Repactua: pagamento com problema",
+                f"Evento {tipo} para {org.nome or email or cust_id} — conta inativada.")
         db.session.commit()
     return jsonify({"ok": True})
 
@@ -1515,6 +1620,7 @@ def _admin_page(titulo, conteudo, ativo="dash", extra_js=""):
         ("dash", "/admin", "📊", "Dashboard"),
         ("assin", "/admin/assinantes", "👥", "Assinantes"),
         ("fin", "/admin/financeiro", "💰", "Financeiro"),
+        ("logs", "/admin/logs", "📜", "Atividades"),
         ("sub", "/admin/subconta", "🏦", "Subconta"),
         ("wh", "/admin/configurar-webhook", "🔗", "Webhook"),
         ("calc", "/calculadora", "🧮", "Calculadora"),
@@ -1570,6 +1676,9 @@ def admin():
         User.usage_mes == mes_atual).scalar() or 0
     total_casos = Caso.query.count()
     total_users = User.query.count()
+    conv_pct = round(pagantes * 100 / len(orgs)) if orgs else 0
+    ja_ativas = pagantes + inativos  # aproximação: quem já esteve/está no jogo pago
+    churn_pct = round(inativos * 100 / ja_ativas) if ja_ativas else 0
 
     # receita real (Asaas)
     pags = _pagamentos_repactua()
@@ -1629,6 +1738,8 @@ def admin():
       <div class="mc"><div class="lbl">Contas ativas</div><div class="val">{ativos}</div><div class="det">{pagantes} pagas · {cortesias} cortesia</div></div>
       <div class="mc ouro"><div class="lbl">Em teste</div><div class="val">{trials}</div></div>
       <div class="mc rubi"><div class="lbl">Inativas</div><div class="val">{inativos}</div></div>
+      <div class="mc"><div class="lbl">Conversão p/ pago</div><div class="val">{conv_pct}%</div><div class="det">{pagantes} de {len(orgs)} conta(s)</div></div>
+      <div class="mc rubi"><div class="lbl">Churn (estimado)</div><div class="val">{churn_pct}%</div><div class="det">inativas vs. já ativas</div></div>
       <div class="mc"><div class="lbl">Usuários (logins)</div><div class="val">{total_users}</div></div>
       <div class="mc"><div class="lbl">Consultas IA no mês</div><div class="val">{uso_ia}</div></div>
       <div class="mc"><div class="lbl">Casos salvos</div><div class="val">{total_casos}</div></div>
@@ -1694,8 +1805,9 @@ def admin_assinantes():
             botao_excluir = (f'<form method="post" action="/admin/excluir/{u.id}" style="display:inline" '
                              f"onsubmit=\"return confirm('EXCLUIR {u.email}? Isso apaga {alvo}. Não pode ser desfeito.')\">"
                              f'<button class="btn-x">🗑 excluir</button></form>')
+        nome_cel = f'<a href="/admin/org/{u.org_id}"><b>{u.nome or "—"}</b></a>' if u.org_id else f'<b>{u.nome or "—"}</b>'
         linhas += f"""<tr>
-          <td>{u.nome or '—'}{selo_admin}<br><small>{u.email}</small></td>
+          <td>{nome_cel}{selo_admin}<br><small>{u.email}</small></td>
           <td>{u.escritorio or '—'}<br><small>{plano} · {papel}</small>{extra}</td>
           <td><b>{u.status_efetivo}</b></td>
           <td>{uso_mes}/{u.limite_mensal}<br><small>cota pessoal</small></td>
@@ -1709,8 +1821,11 @@ def admin_assinantes():
           </td></tr>"""
     conteudo = f"""
     <h1>Assinantes</h1>
-    <div class="sub">{len(users)} login(s) cadastrado(s)</div>
-    <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, plano...">
+    <div class="sub">{len(users)} login(s) cadastrado(s) · clique no nome para abrir a ficha completa</div>
+    <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+      <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, plano...">
+      <a href="/admin/export/assinantes.csv" style="background:#1a3a5c;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-size:.82rem;font-weight:700">⬇ Exportar CSV</a>
+    </div>
     <table><thead><tr><th>Advogado</th><th>Escritório / plano</th><th>Status</th><th>Uso/mês</th><th>Ações</th></tr></thead>
     <tbody id="tbAssinantes">{linhas}</tbody></table>
     <p class="nota">Excluir um <b>dono</b> apaga o escritório inteiro (membros e casos). Excluir um <b>membro</b> apaga só aquele login. Admins protegidos não podem ser excluídos.</p>"""
@@ -1723,6 +1838,154 @@ def admin_assinantes():
     }
     </script>"""
     return _admin_page("Assinantes", conteudo, "assin", js)
+
+
+@app.route("/admin/org/<int:oid>")
+def admin_org(oid):
+    """Ficha completa de uma conta: membros, cotas, pagamentos, ações de suporte."""
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    org = db.session.get(Escritorio, oid)
+    if not org:
+        return redirect(url_for("admin_assinantes"))
+    senha_gerada = request.args.get("senha")
+    aviso = ""
+    if senha_gerada:
+        aviso = (f'<div style="background:#e9f7ee;color:#1b5e20;border:1px solid #7ec891;'
+                 f'border-radius:8px;padding:12px;margin-bottom:14px;font-size:.9rem">'
+                 f'🔑 Senha temporária gerada: <b style="font-family:monospace;font-size:1.05rem">{senha_gerada}</b>'
+                 f' — repasse ao cliente e oriente a trocar em "Minha conta".</div>')
+    plano_nome = PLANOS.get(org.plano, {}).get("nome", org.plano or "—")
+    cls = {"ativo": "b-ativo", "trial": "b-trial"}.get(org.status, "b-inativo")
+    validade = org.acesso_ate.strftime("%d/%m/%Y") if org.acesso_ate else "sem expiração"
+    n_casos = Caso.query.filter_by(org_id=org.id).count()
+    mes = datetime.utcnow().strftime("%Y-%m")
+
+    linhas_m = ""
+    for m in sorted(org.usuarios or [], key=lambda x: (x.papel != "dono", x.email)):
+        uso = (m.usage_contagem or 0) if m.usage_mes == mes else 0
+        protegido = (m.email == ADMIN_EMAIL) or (m.email == session.get("admin_email"))
+        acoes = f"""
+          <form method="post" action="/admin/resetsenha/{m.id}" style="display:inline"
+            onsubmit="return confirm('Gerar senha temporária para {m.email}?')">
+            <button class="btn-mini">🔑 nova senha</button></form>
+          <form method="post" action="/admin/resetuso/{m.id}" style="display:inline"
+            onsubmit="return confirm('Zerar o uso do mês de {m.email}?')">
+            <button class="btn-mini">♻️ zerar uso</button></form>
+          <a class="btn-mini" style="text-decoration:none;display:inline-block"
+             href="/admin/entrar-como/{m.id}"
+             onclick="return confirm('Entrar como {m.email}? Você verá o sistema como este cliente.')">👁 entrar como</a>"""
+        if protegido:
+            acoes = '<span style="color:#aaa;font-size:.78rem">admin protegido</span>'
+        linhas_m += f"""<tr>
+          <td>{m.nome or '—'}<br><small>{m.email}</small></td>
+          <td>{m.papel or 'dono'}</td>
+          <td><form method="post" action="/admin/cota/{m.id}" style="display:flex;gap:6px">
+            <input type="number" name="cota" value="{m.cota_mensal or 0}" min="0"
+              style="width:76px;padding:5px 8px;border:1.5px solid #d0d7e2;border-radius:6px">
+            <button class="btn-mini">salvar</button></form></td>
+          <td>{uso}</td>
+          <td>{acoes}</td></tr>"""
+
+    # pagamentos deste cliente no Asaas
+    linhas_p = ""
+    if org.asaas_customer_id:
+        try:
+            r = asaas("GET", f"/payments?customer={org.asaas_customer_id}&limit=20")
+            STATUS_PT = {"RECEIVED": ("Recebido", "b-ativo"), "CONFIRMED": ("Confirmado", "b-ativo"),
+                         "PENDING": ("Aguardando", "b-trial"), "OVERDUE": ("Vencido", "b-inativo"),
+                         "REFUNDED": ("Estornado", "b-inativo")}
+            for p in (r.get("data") or []):
+                dtp = (p.get("clientPaymentDate") or p.get("paymentDate") or p.get("dueDate") or "")
+                dtf = f"{dtp[8:10]}/{dtp[5:7]}/{dtp[:4]}" if len(dtp) >= 10 else "—"
+                sn, sc = STATUS_PT.get(p.get("status") or "", (p.get("status") or "—", "b-trial"))
+                linhas_p += (f'<tr><td>{dtf}</td><td>R$ {("%.2f" % float(p.get("value") or 0)).replace(".", ",")}</td>'
+                             f'<td>{p.get("billingType") or "—"}</td><td><span class="badge {sc}">{sn}</span></td></tr>')
+        except Exception:
+            pass
+    if not linhas_p:
+        linhas_p = '<tr><td colspan="4" style="color:#8a97a5">Nenhum pagamento encontrado.</td></tr>'
+
+    ret = f"/admin/org/{org.id}"
+    conteudo = f"""
+    <a href="/admin/assinantes" style="color:#2c5f8a;text-decoration:none;font-size:.85rem">← Voltar aos assinantes</a>
+    <h1 style="margin-top:8px">{org.nome or 'Conta'}</h1>
+    <div class="sub">Ficha da conta · cadastro em {(org.criado_em or datetime.utcnow()).strftime('%d/%m/%Y')}</div>
+    {aviso}
+    <div class="cards">
+      <div class="mc"><div class="lbl">Plano</div><div class="val" style="font-size:1.1rem">{plano_nome}</div>
+        <div class="det"><a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/escritorio?next={ret}">→ escritório</a> · <a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/individual?next={ret}">→ individual</a></div></div>
+      <div class="mc"><div class="lbl">Situação</div><div class="val" style="font-size:1.1rem"><span class="badge {cls}">{org.status}</span></div>
+        <div class="det"><a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/ativo?next={ret}">ativar</a> · <a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/inativo?next={ret}">inativar</a> · <a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/trial?next={ret}">trial</a></div></div>
+      <div class="mc"><div class="lbl">Acesso válido até</div><div class="val" style="font-size:1.1rem">{validade}</div>
+        <div class="det">{'assinatura ativa' if org.asaas_subscription_id else 'sem assinatura paga'}</div></div>
+      <div class="mc"><div class="lbl">Pool de créditos</div><div class="val" style="font-size:1.1rem">{org.cota_distribuida}/{org.creditos_total}</div>
+        <div class="det">{org.total_membros}/{org.max_membros} acessos · {n_casos} caso(s)</div></div>
+    </div>
+    <h2>👥 Membros</h2>
+    <table><thead><tr><th>Membro</th><th>Papel</th><th>Cota/mês</th><th>Usou</th><th>Suporte</th></tr></thead>
+    <tbody>{linhas_m}</tbody></table>
+    <h2>💸 Pagamentos desta conta</h2>
+    <table><thead><tr><th>Data</th><th>Valor</th><th>Forma</th><th>Status</th></tr></thead>
+    <tbody>{linhas_p}</tbody></table>
+    <p class="nota">"Entrar como" abre o sistema logado como o cliente (sua sessão de admin continua valendo — volte pelo /admin). A senha temporária aparece uma única vez.</p>
+    <style>.btn-mini{{background:#eef4fb;color:#2c5f8a;border:none;border-radius:6px;padding:4px 9px;font-size:.74rem;font-weight:700;cursor:pointer;margin:2px 2px 2px 0}}.btn-mini:hover{{background:#1a3a5c;color:#fff}}</style>"""
+    return _admin_page(org.nome or "Conta", conteudo, "assin")
+
+
+@app.route("/admin/cota/<int:uid>", methods=["POST"])
+def admin_cota(uid):
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    u = db.session.get(User, uid)
+    if u:
+        try:
+            u.cota_mensal = max(int(request.form.get("cota") or 0), 0)
+            db.session.commit()
+            _log_admin(f"ajustou cota para {u.cota_mensal}", u.email)
+        except ValueError:
+            pass
+    return redirect(f"/admin/org/{u.org_id}" if u and u.org_id else url_for("admin_assinantes"))
+
+
+@app.route("/admin/resetuso/<int:uid>", methods=["POST"])
+def admin_resetuso(uid):
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    u = db.session.get(User, uid)
+    if u:
+        u.usage_mes = datetime.utcnow().strftime("%Y-%m")
+        u.usage_contagem = 0
+        db.session.commit()
+        _log_admin("zerou o uso do mês", u.email)
+    return redirect(f"/admin/org/{u.org_id}" if u and u.org_id else url_for("admin_assinantes"))
+
+
+@app.route("/admin/resetsenha/<int:uid>", methods=["POST"])
+def admin_resetsenha(uid):
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    u = db.session.get(User, uid)
+    if not u or u.email == ADMIN_EMAIL or u.email == session.get("admin_email"):
+        return redirect(url_for("admin_assinantes"))
+    nova = secrets.token_hex(4)  # 8 caracteres
+    u.set_senha(nova)
+    db.session.commit()
+    _log_admin("gerou senha temporária", u.email)
+    return redirect(f"/admin/org/{u.org_id}?senha={nova}" if u.org_id else url_for("admin_assinantes"))
+
+
+@app.route("/admin/entrar-como/<int:uid>")
+def admin_entrar_como(uid):
+    """Loga como o cliente para dar suporte (a sessão de admin continua ativa)."""
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    u = db.session.get(User, uid)
+    if not u:
+        return redirect(url_for("admin_assinantes"))
+    _log_admin("entrou como cliente", u.email)
+    login_user(u, remember=False)
+    return redirect(url_for("index"))
 
 
 @app.route("/admin/excluir/<int:uid>", methods=["POST"])
@@ -1743,7 +2006,76 @@ def admin_excluir(uid):
         Caso.query.filter_by(user_id=u.id).update({"user_id": None})
         db.session.delete(u)
     db.session.commit()
+    _log_admin("excluiu conta/login", u.email)
     return redirect(url_for("admin_assinantes"))
+
+
+@app.route("/admin/logs")
+def admin_logs():
+    """Histórico das ações administrativas (auditoria)."""
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    logs = LogAdmin.query.order_by(LogAdmin.quando.desc()).limit(200).all()
+    linhas = "".join(
+        f"<tr><td>{(l.quando or datetime.utcnow()).strftime('%d/%m/%Y %H:%M')}</td>"
+        f"<td>{l.admin_email or '—'}</td><td>{l.acao or '—'}</td><td>{l.alvo or '—'}</td></tr>"
+        for l in logs) or '<tr><td colspan="4" style="color:#8a97a5">Nenhuma atividade registrada ainda.</td></tr>'
+    conteudo = f"""
+    <h1>Atividades</h1>
+    <div class="sub">Últimas 200 ações administrativas (auditoria)</div>
+    <table><thead><tr><th>Quando</th><th>Admin</th><th>Ação</th><th>Alvo</th></tr></thead>
+    <tbody>{linhas}</tbody></table>"""
+    return _admin_page("Atividades", conteudo, "logs")
+
+
+def _csv_response(nome, cabecalho, linhas):
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(cabecalho)
+    w.writerows(linhas)
+    return Response("﻿" + buf.getvalue(), mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename={nome}"})
+
+
+@app.route("/admin/export/assinantes.csv")
+def export_assinantes():
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    linhas = []
+    for u in User.query.order_by(User.criado_em.desc()).all():
+        org = u.org
+        linhas.append([
+            u.nome or "", u.email, u.escritorio or "",
+            (org.plano if org else ""), u.papel or "dono", u.status_efetivo,
+            u.cota_mensal or 0,
+            (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime("%Y-%m") else 0,
+            (org.telefone if org else "") or "", (org.cidade if org else "") or "",
+            (org.uf if org else "") or "",
+            (u.criado_em or datetime.utcnow()).strftime("%d/%m/%Y"),
+        ])
+    _log_admin("exportou CSV de assinantes")
+    return _csv_response("assinantes-repactua.csv",
+                         ["Nome", "Email", "Escritorio", "Plano", "Papel", "Status",
+                          "Cota", "Uso no mes", "Telefone", "Cidade", "UF", "Cadastro"], linhas)
+
+
+@app.route("/admin/export/pagamentos.csv")
+def export_pagamentos():
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    nomes = _mapa_clientes_asaas()
+    linhas = []
+    for p in _pagamentos_repactua():
+        dt = (p.get("clientPaymentDate") or p.get("paymentDate") or p.get("dueDate") or "")
+        linhas.append([
+            dt[:10], nomes.get(p.get("customer"), p.get("customer") or ""),
+            str(p.get("value") or 0).replace(".", ","),
+            p.get("billingType") or "", p.get("status") or "",
+            p.get("description") or "",
+        ])
+    _log_admin("exportou CSV de pagamentos")
+    return _csv_response("pagamentos-repactua.csv",
+                         ["Data", "Cliente", "Valor", "Forma", "Status", "Descricao"], linhas)
 
 
 @app.route("/admin/status/<int:uid>/<novo>")
@@ -1756,7 +2088,9 @@ def admin_status(uid, novo):
         if u.org:
             u.org.status = novo    # fonte de verdade
         db.session.commit()
-    return redirect(url_for("admin_assinantes"))
+        _log_admin(f"mudou status para {novo}", u.email)
+    nxt = request.args.get("next") or ""
+    return redirect(nxt if nxt.startswith("/admin") else url_for("admin_assinantes"))
 
 
 @app.route("/admin/admin/<int:uid>/<int:val>")
@@ -1773,6 +2107,7 @@ def admin_set_admin(uid, val):
             if u.email != ADMIN_EMAIL and u.email != session.get("admin_email"):
                 u.is_admin = False
         db.session.commit()
+        _log_admin("promoveu a admin" if val == 1 else "removeu admin", u.email)
     return redirect(url_for("admin_assinantes"))
 
 
@@ -1795,7 +2130,9 @@ def admin_plano(uid, plano):
         else:
             u.cota_mensal = 50
         db.session.commit()
-    return redirect(url_for("admin_assinantes"))
+        _log_admin(f"mudou plano para {plano} (cortesia)", u.email)
+    nxt = request.args.get("next") or ""
+    return redirect(nxt if nxt.startswith("/admin") else url_for("admin_assinantes"))
 
 
 @app.route("/admin/subconta", methods=["GET", "POST"])
@@ -2080,7 +2417,10 @@ def admin_financeiro():
       </div>
 
       <h2>👥 Assinantes</h2>
-      <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, cidade...">
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+        <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, cidade...">
+        <a href="/admin/export/pagamentos.csv" style="background:#1a3a5c;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-size:.82rem;font-weight:700">⬇ Pagamentos (CSV)</a>
+      </div>
       <table><thead><tr><th>Assinante</th><th>Situação</th><th>Valor</th><th>Plano</th><th>Membros</th><th>Contato</th><th>Cidade</th><th>Cadastro</th></tr></thead>
       <tbody id="tbAssinantes">{linhas}</tbody></table>
       <p class="nota">Recebido/A receber = pagamentos reais do Asaas com "Repactua" na descrição. MRR = soma dos planos <b>pagos</b> ativos (cortesias não entram). "Em dia" conta todos os ativos, inclusive cortesias.</p>"""
