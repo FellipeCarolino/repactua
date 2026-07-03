@@ -1505,7 +1505,7 @@ def admin():
     small{{color:#8a97a5;font-weight:400}}</style></head><body>
     <div class="barra">
       <div class="marca">{logo_repactua(30)} <div>Repactua<small>Painel administrativo</small></div></div>
-      <div><a href="/admin/subconta">Criar subconta</a><a href="/calculadora">← Calculadora</a><a href="/admin/logout">Sair do admin ↪</a></div>
+      <div><a href="/admin/financeiro">Financeiro</a><a href="/admin/subconta">Criar subconta</a><a href="/calculadora">← Calculadora</a><a href="/admin/logout">Sair do admin ↪</a></div>
     </div>
     <div class="wrap">
       <h1>Assinantes</h1>
@@ -1661,6 +1661,84 @@ def admin_subconta():
       <label>Bairro</label><input name="province" value="{d['province']}" required>
       <button class="btn" type="submit" onclick="return confirm('Criar a subconta no Asaas com estes dados?')">Criar subconta</button>
     </form></div></div></body></html>"""
+    return Response(html, mimetype="text/html")
+
+
+@app.route("/admin/financeiro")
+def admin_financeiro():
+    """Painel financeiro: MRR, contas por situação e tabela de assinantes."""
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    orgs = Escritorio.query.order_by(Escritorio.criado_em.desc()).all()
+    mrr = ativos = trials = inativos = 0
+    linhas = ""
+    for o in orgs:
+        valor = PLANOS.get(o.plano, {}).get("valor", 0)
+        if o.status == "ativo":
+            ativos += 1
+            mrr += valor
+        elif o.status == "trial":
+            trials += 1
+        else:
+            inativos += 1
+        dono = next((u for u in (o.usuarios or []) if u.papel == "dono"), None) or \
+               (o.usuarios[0] if o.usuarios else None)
+        nome = o.nome or (dono.nome if dono else "—")
+        email = dono.email if dono else "—"
+        plano_nome = PLANOS.get(o.plano, {}).get("nome", o.plano or "—")
+        valor_fmt = ("R$ %.2f/mês" % valor).replace(".", ",")
+        cadastro = (o.criado_em or datetime.utcnow()).strftime("%d/%m/%Y")
+        cls = {"ativo": "b-ativo", "trial": "b-trial", "inativo": "b-inativo"}.get(o.status, "b-trial")
+        sit = {"ativo": "Em dia", "trial": "Em teste", "inativo": "Inativo"}.get(o.status, o.status)
+        linhas += f"""<tr>
+          <td><b>{nome}</b><br><small>{email}</small></td>
+          <td><span class="badge {cls}">{sit}</span></td>
+          <td>{valor_fmt}</td>
+          <td>{plano_nome}</td>
+          <td>{o.total_membros}/{o.max_membros}</td>
+          <td>{cadastro}</td></tr>"""
+    mrr_fmt = ("R$ %.2f" % mrr).replace(".", ",")
+
+    html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Financeiro · Repactua</title><style>
+    *{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}}
+    body{{background:#f4f6f9;color:#1c2b3a}}
+    .barra{{background:#1a3a5c;color:#fff;padding:12px 28px;display:flex;align-items:center;justify-content:space-between}}
+    .barra .marca{{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05rem}}
+    .barra .marca small{{display:block;font-weight:400;opacity:.75;font-size:.72rem}}
+    .barra a{{color:#fff;text-decoration:none;font-size:.85rem;opacity:.9;margin-left:16px}} .barra a:hover{{color:#f0b429}}
+    .wrap{{max-width:1160px;margin:0 auto;padding:24px}}
+    h1{{color:#1a3a5c;font-size:1.4rem;margin-bottom:2px}} .sub{{color:#5a6a7a;font-size:.88rem;margin-bottom:18px}}
+    .cards{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:20px}}
+    .mc{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:18px 20px}}
+    .mc .lbl{{font-size:.74rem;text-transform:uppercase;letter-spacing:.4px;color:#5a6a7a;margin-bottom:6px}}
+    .mc .val{{font-size:1.7rem;font-weight:700;color:#1a3a5c}}
+    .mc.mrr{{border-left:4px solid #1e7e34}} .mc.mrr .val{{color:#1e7e34}}
+    .mc.emteste .val{{color:#c8960c}} .mc.inativo .val{{color:#a3271a}}
+    table{{width:100%;border-collapse:collapse;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.07);border-radius:10px;overflow:hidden}}
+    th{{background:#1a3a5c;color:#fff;padding:11px;text-align:left;font-size:.74rem;text-transform:uppercase;letter-spacing:.4px}}
+    td{{padding:11px;border-bottom:1px solid #eef1f5;font-size:.88rem}} tr:hover td{{background:#fafbfd}}
+    small{{color:#8a97a5}}
+    .badge{{padding:3px 12px;border-radius:20px;font-size:.76rem;font-weight:700}}
+    .b-ativo{{background:#e9f7ee;color:#1b5e20}}.b-trial{{background:#fff4e0;color:#9a6700}}.b-inativo{{background:#fdecea;color:#7a2218}}</style></head>
+    <body><div class="barra">
+      <div class="marca">{logo_repactua(30)} <div>Repactua<small>Painel financeiro</small></div></div>
+      <div><a href="/admin">← Assinantes</a><a href="/admin/logout">Sair do admin ↪</a></div>
+    </div>
+    <div class="wrap">
+      <h1>Financeiro do Repactua</h1>
+      <div class="sub">Situação da assinatura e receita recorrente</div>
+      <div class="cards">
+        <div class="mc mrr"><div class="lbl">Receita mensal (MRR)</div><div class="val">{mrr_fmt}</div></div>
+        <div class="mc"><div class="lbl">Total de contas</div><div class="val">{len(orgs)}</div></div>
+        <div class="mc"><div class="lbl">Em dia</div><div class="val">{ativos}</div></div>
+        <div class="mc emteste"><div class="lbl">Em teste</div><div class="val">{trials}</div></div>
+        <div class="mc inativo"><div class="lbl">Inativos</div><div class="val">{inativos}</div></div>
+      </div>
+      <table><thead><tr><th>Assinante</th><th>Situação</th><th>Valor</th><th>Plano</th><th>Membros</th><th>Cadastro</th></tr></thead>
+      <tbody>{linhas}</tbody></table>
+      <p style="font-size:.78rem;color:#8a97a5;margin-top:12px">MRR estimado pela soma dos planos ativos. Contas de cortesia (sem cobrança) também contam como ativas.</p>
+    </div></body></html>"""
     return Response(html, mimetype="text/html")
 
 
