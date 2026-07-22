@@ -2103,6 +2103,33 @@ def admin_excluir(uid):
     return redirect(url_for("admin_assinantes"))
 
 
+def _admin_testar_email_impl():
+    """Tenta enviar um e-mail de teste e devolve o erro real (sem engolir exceção)."""
+    para = request.args.get("para") or ALERTA_EMAIL or ADMIN_EMAIL
+    try:
+        msg = MIMEText("Teste de envio do Repactua — se você recebeu, o SMTP está funcionando! 🎉",
+                       "plain", "utf-8")
+        msg["Subject"] = "Repactua — teste de e-mail"
+        msg["From"] = SMTP_FROM
+        msg["To"] = para
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+            s.starttls()
+            if SMTP_USER:
+                s.login(SMTP_USER, SMTP_PASS)
+            s.send_message(msg)
+        return {"ok": True, "enviado_para": para, "de": SMTP_FROM, "host": SMTP_HOST}
+    except Exception as e:
+        return {"ok": False, "erro": (type(e).__name__ + ": " + str(e))[:600],
+                "host": SMTP_HOST, "porta": SMTP_PORT, "user": SMTP_USER}
+
+
+@app.route("/admin/testar-email")
+def admin_testar_email():
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    return jsonify(_admin_testar_email_impl())
+
+
 @app.route("/admin/logs")
 def admin_logs():
     """Histórico das ações administrativas (auditoria)."""
