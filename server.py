@@ -215,6 +215,8 @@ class User(UserMixin, db.Model):
     org_id = db.Column(db.Integer, db.ForeignKey("escritorio.id"))
     papel = db.Column(db.String(20), default="dono")  # dono | membro
     cota_mensal = db.Column(db.Integer, default=50)    # créditos atribuídos a este usuário
+    reset_token = db.Column(db.String(80))             # recuperação de senha
+    reset_expira = db.Column(db.DateTime)
 
     def set_senha(self, senha):
         self.senha_hash = generate_password_hash(senha, method="pbkdf2:sha256")
@@ -307,6 +309,8 @@ def _migrar_schema():
         'ALTER TABLE "user" ADD COLUMN org_id INTEGER',
         'ALTER TABLE "user" ADD COLUMN papel VARCHAR(20)',
         'ALTER TABLE "user" ADD COLUMN cota_mensal INTEGER',
+        'ALTER TABLE "user" ADD COLUMN reset_token VARCHAR(80)',
+        'ALTER TABLE "user" ADD COLUMN reset_expira TIMESTAMP',
         'ALTER TABLE escritorio ADD COLUMN creditos_total INTEGER',
         'ALTER TABLE escritorio ADD COLUMN timbre TEXT',
         'ALTER TABLE escritorio ADD COLUMN asaas_subscription_id VARCHAR(120)',
@@ -596,8 +600,88 @@ def pagina_login():
       <label>Senha</label><input type="password" name="senha" required placeholder="••••••••">
       <button class="btn" type="submit">Entrar</button>
     </form>
+    <div class="link"><a href="/esqueci-senha">Esqueci minha senha</a></div>
     <div class="link">Ainda não tem conta? <a href="/signup">Criar conta</a></div>"""
     return _pagina_auth("Entrar", corpo)
+
+
+@app.route("/esqueci-senha", methods=["GET", "POST"])
+def esqueci_senha():
+    """Recuperação de senha: envia link por e-mail com token de 1 hora."""
+    msg = ""
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        user = User.query.filter_by(email=email).first() if email else None
+        if user and SMTP_HOST:
+            token = secrets.token_urlsafe(32)
+            user.reset_token = token
+            user.reset_expira = datetime.utcnow() + timedelta(hours=1)
+            db.session.commit()
+            link = f"https://repactua.com.br/redefinir-senha?t={token}"
+            _enviar_email(
+                "Repactua — redefinição de senha",
+                f"Olá!\n\nRecebemos um pedido para redefinir a senha da sua conta no Repactua.\n\n"
+                f"Para criar uma nova senha, acesse o link abaixo (válido por 1 hora):\n{link}\n\n"
+                f"Se você não pediu a redefinição, ignore este e-mail — sua senha continua a mesma.\n\n"
+                f"Equipe Repactua · repactua.com.br",
+                para=email)
+        if SMTP_HOST:
+            # resposta genérica: não revela se o e-mail existe (evita enumeração de contas)
+            msg = ('<div class="ok">Se este e-mail estiver cadastrado, enviamos um link de '
+                   'redefinição. Verifique a caixa de entrada e o spam (válido por 1 hora).</div>')
+        else:
+            msg = ('<div class="erro">O envio automático de e-mail ainda não está configurado. '
+                   'Entre em contato com o suporte pelo e-mail <b>' + (ALERTA_EMAIL or ADMIN_EMAIL) +
+                   '</b> que redefinimos sua senha rapidinho.</div>')
+    corpo = f"""<h2>Recuperar senha</h2>
+    <div class="sub">Informe o e-mail da sua conta e enviaremos um link para criar uma nova senha.</div>{msg}
+    <form method="post">
+      <label>E-mail</label><input type="email" name="email" required placeholder="voce@escritorio.adv.br">
+      <button class="btn" type="submit">Enviar link de redefinição</button>
+    </form>
+    <div class="link"><a href="/login">← Voltar ao login</a></div>"""
+    return _pagina_auth("Recuperar senha", corpo)
+
+
+@app.route("/redefinir-senha", methods=["GET", "POST"])
+def redefinir_senha():
+    """Define a nova senha a partir do token recebido por e-mail."""
+    token = (request.values.get("t") or "").strip()
+    user = User.query.filter_by(reset_token=token).first() if token else None
+    valido = bool(user and user.reset_expira and user.reset_expira > datetime.utcnow())
+    if not valido:
+        corpo = """<h2>Link inválido ou expirado</h2>
+        <div class="sub">O link de redefinição não é válido ou passou de 1 hora.</div>
+        <div class="link"><a href="/esqueci-senha">Pedir um novo link</a> · <a href="/login">Voltar ao login</a></div>"""
+        return _pagina_auth("Redefinir senha", corpo)
+    if request.method == "POST":
+        senha = request.form.get("senha") or ""
+        confirma = request.form.get("confirma") or ""
+        if len(senha) < 6:
+            msg = '<div class="erro">A senha deve ter no mínimo 6 caracteres.</div>'
+        elif senha != confirma:
+            msg = '<div class="erro">As senhas não conferem.</div>'
+        else:
+            user.set_senha(senha)
+            user.reset_token = None
+            user.reset_expira = None
+            db.session.commit()
+            login_user(user, remember=True)
+            return redirect(url_for("index"))
+        corpo = f"""<h2>Criar nova senha</h2><div class="sub">Conta: {user.email}</div>{msg}
+        <form method="post"><input type="hidden" name="t" value="{token}">
+          <label>Nova senha</label><input type="password" name="senha" required placeholder="mínimo 6 caracteres">
+          <label>Confirmar senha</label><input type="password" name="confirma" required placeholder="repita a senha">
+          <button class="btn" type="submit">Salvar nova senha</button>
+        </form>"""
+        return _pagina_auth("Redefinir senha", corpo)
+    corpo = f"""<h2>Criar nova senha</h2><div class="sub">Conta: {user.email}</div>
+    <form method="post"><input type="hidden" name="t" value="{token}">
+      <label>Nova senha</label><input type="password" name="senha" required placeholder="mínimo 6 caracteres">
+      <label>Confirmar senha</label><input type="password" name="confirma" required placeholder="repita a senha">
+      <button class="btn" type="submit">Salvar nova senha</button>
+    </form>"""
+    return _pagina_auth("Redefinir senha", corpo)
 
 
 @app.route("/signup", methods=["GET", "POST"])
