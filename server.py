@@ -95,30 +95,60 @@ NF_DEDUCOES = float(os.environ.get("NF_DEDUCOES", "0") or 0)
 NF_OBSERVACOES = os.environ.get("NF_OBSERVACOES", "")
 NF_QUANDO = os.environ.get("NF_QUANDO", "ON_PAYMENT_CONFIRMATION")
 
-# --- Alertas por e-mail para o admin (opcional; ativa ao definir SMTP_HOST) ---
-SMTP_HOST = os.environ.get("SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587") or 587)
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
-SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER)
-ALERTA_EMAIL = os.environ.get("ALERTA_EMAIL", "")  # destino dos avisos (padrão: ADMIN_EMAIL)
+# --- E-mail (recuperação de senha + alertas) ---
+# Preferência: BREVO_API_KEY (API HTTPS — Railway bloqueia SMTP tradicional).
+# Fallback: SMTP clássico (SMTP_HOST etc.), útil fora do Railway.
+BREVO_API_KEY = (os.environ.get("BREVO_API_KEY") or "").strip()
+SMTP_HOST = (os.environ.get("SMTP_HOST") or "").strip()
+SMTP_PORT = int((os.environ.get("SMTP_PORT") or "587").strip() or 587)
+SMTP_USER = (os.environ.get("SMTP_USER") or "").strip()
+SMTP_PASS = (os.environ.get("SMTP_PASS") or "").strip()
+SMTP_FROM = (os.environ.get("SMTP_FROM") or SMTP_USER).strip()
+ALERTA_EMAIL = (os.environ.get("ALERTA_EMAIL") or "").strip()  # destino dos avisos (padrão: ADMIN_EMAIL)
+
+
+def email_ativo():
+    return bool(BREVO_API_KEY or SMTP_HOST)
+
+
+def _enviar_email_impl(assunto, corpo, para=None):
+    """Envia e levanta exceção em caso de erro (para diagnóstico)."""
+    para = para or ALERTA_EMAIL or ADMIN_EMAIL
+    if BREVO_API_KEY:
+        payload = {
+            "sender": {"name": "Repactua", "email": SMTP_FROM or ALERTA_EMAIL or ADMIN_EMAIL},
+            "to": [{"email": para}],
+            "subject": assunto,
+            "textContent": corpo,
+        }
+        req = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=json.dumps(payload).encode("utf-8"), method="POST",
+            headers={"api-key": BREVO_API_KEY, "Content-Type": "application/json",
+                     "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=20):
+                return True
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"Brevo {e.code}: {e.read().decode('utf-8', 'ignore')[:400]}")
+    if not SMTP_HOST:
+        raise RuntimeError("Nenhum provedor de e-mail configurado (BREVO_API_KEY ou SMTP_HOST).")
+    msg = MIMEText(corpo, "plain", "utf-8")
+    msg["Subject"] = assunto
+    msg["From"] = SMTP_FROM
+    msg["To"] = para
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+        s.starttls()
+        if SMTP_USER:
+            s.login(SMTP_USER, SMTP_PASS)
+        s.send_message(msg)
+    return True
 
 
 def _enviar_email(assunto, corpo, para=None):
-    """Envia e-mail de alerta. Silencioso se SMTP não configurado ou em erro."""
-    if not SMTP_HOST:
-        return False
+    """Envia e-mail. Silencioso em caso de erro (não travar fluxos de negócio)."""
     try:
-        msg = MIMEText(corpo, "plain", "utf-8")
-        msg["Subject"] = assunto
-        msg["From"] = SMTP_FROM
-        msg["To"] = para or ALERTA_EMAIL or ADMIN_EMAIL
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-            s.starttls()
-            if SMTP_USER:
-                s.login(SMTP_USER, SMTP_PASS)
-            s.send_message(msg)
-        return True
+        return _enviar_email_impl(assunto, corpo, para)
     except Exception:
         return False
 
@@ -612,7 +642,7 @@ def esqueci_senha():
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
         user = User.query.filter_by(email=email).first() if email else None
-        if user and SMTP_HOST:
+        if user and email_ativo():
             token = secrets.token_urlsafe(32)
             user.reset_token = token
             user.reset_expira = datetime.utcnow() + timedelta(hours=1)
@@ -625,7 +655,7 @@ def esqueci_senha():
                 f"Se você não pediu a redefinição, ignore este e-mail — sua senha continua a mesma.\n\n"
                 f"Equipe Repactua · repactua.com.br",
                 para=email)
-        if SMTP_HOST:
+        if email_ativo():
             # resposta genérica: não revela se o e-mail existe (evita enumeração de contas)
             msg = ('<div class="ok">Se este e-mail estiver cadastrado, enviamos um link de '
                    'redefinição. Verifique a caixa de entrada e o spam (válido por 1 hora).</div>')
@@ -1011,7 +1041,7 @@ def health():
         "preco_individual": valor_cobranca("individual"),
         "preco_escritorio": valor_cobranca("escritorio"),
         "modo_teste_preco": bool(os.environ.get("PLANO_VALOR")),
-        "smtp_configurado": bool(SMTP_HOST),
+        "smtp_configurado": email_ativo(),
     })
 
 
@@ -2106,21 +2136,16 @@ def admin_excluir(uid):
 def _admin_testar_email_impl():
     """Tenta enviar um e-mail de teste e devolve o erro real (sem engolir exceção)."""
     para = request.args.get("para") or ALERTA_EMAIL or ADMIN_EMAIL
+    provedor = "brevo-api" if BREVO_API_KEY else ("smtp:" + SMTP_HOST if SMTP_HOST else "nenhum")
     try:
-        msg = MIMEText("Teste de envio do Repactua — se você recebeu, o SMTP está funcionando! 🎉",
-                       "plain", "utf-8")
-        msg["Subject"] = "Repactua — teste de e-mail"
-        msg["From"] = SMTP_FROM
-        msg["To"] = para
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
-            s.starttls()
-            if SMTP_USER:
-                s.login(SMTP_USER, SMTP_PASS)
-            s.send_message(msg)
-        return {"ok": True, "enviado_para": para, "de": SMTP_FROM, "host": SMTP_HOST}
+        _enviar_email_impl("Repactua — teste de e-mail",
+                           "Teste de envio do Repactua — se você recebeu, o e-mail está funcionando! 🎉",
+                           para)
+        return {"ok": True, "enviado_para": para, "provedor": provedor,
+                "remetente": SMTP_FROM or ALERTA_EMAIL or ADMIN_EMAIL}
     except Exception as e:
         return {"ok": False, "erro": (type(e).__name__ + ": " + str(e))[:600],
-                "host": SMTP_HOST, "porta": SMTP_PORT, "user": SMTP_USER}
+                "provedor": provedor}
 
 
 @app.route("/admin/testar-email")
