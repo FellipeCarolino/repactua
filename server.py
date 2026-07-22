@@ -1011,6 +1011,7 @@ def health():
         "preco_individual": valor_cobranca("individual"),
         "preco_escritorio": valor_cobranca("escritorio"),
         "modo_teste_preco": bool(os.environ.get("PLANO_VALOR")),
+        "smtp_configurado": bool(SMTP_HOST),
     })
 
 
