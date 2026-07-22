@@ -98,6 +98,7 @@ NF_QUANDO = os.environ.get("NF_QUANDO", "ON_PAYMENT_CONFIRMATION")
 # --- E-mail (recuperação de senha + alertas) ---
 # Preferência: BREVO_API_KEY (API HTTPS — Railway bloqueia SMTP tradicional).
 # Fallback: SMTP clássico (SMTP_HOST etc.), útil fora do Railway.
+RESEND_API_KEY = (os.environ.get("RESEND_API_KEY") or "").strip()
 BREVO_API_KEY = (os.environ.get("BREVO_API_KEY") or "").strip()
 SMTP_HOST = (os.environ.get("SMTP_HOST") or "").strip()
 SMTP_PORT = int((os.environ.get("SMTP_PORT") or "587").strip() or 587)
@@ -108,12 +109,29 @@ ALERTA_EMAIL = (os.environ.get("ALERTA_EMAIL") or "").strip()  # destino dos avi
 
 
 def email_ativo():
-    return bool(BREVO_API_KEY or SMTP_HOST)
+    return bool(RESEND_API_KEY or BREVO_API_KEY or SMTP_HOST)
 
 
 def _enviar_email_impl(assunto, corpo, para=None):
     """Envia e levanta exceção em caso de erro (para diagnóstico)."""
     para = para or ALERTA_EMAIL or ADMIN_EMAIL
+    if RESEND_API_KEY:
+        payload = {
+            "from": f"Repactua <{SMTP_FROM or 'onboarding@resend.dev'}>",
+            "to": [para],
+            "subject": assunto,
+            "text": corpo,
+        }
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=json.dumps(payload).encode("utf-8"), method="POST",
+            headers={"Authorization": "Bearer " + RESEND_API_KEY,
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=20):
+                return True
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"Resend {e.code}: {e.read().decode('utf-8', 'ignore')[:400]}")
     if BREVO_API_KEY:
         payload = {
             "sender": {"name": "Repactua", "email": SMTP_FROM or ALERTA_EMAIL or ADMIN_EMAIL},
@@ -2136,7 +2154,9 @@ def admin_excluir(uid):
 def _admin_testar_email_impl():
     """Tenta enviar um e-mail de teste e devolve o erro real (sem engolir exceção)."""
     para = request.args.get("para") or ALERTA_EMAIL or ADMIN_EMAIL
-    provedor = "brevo-api" if BREVO_API_KEY else ("smtp:" + SMTP_HOST if SMTP_HOST else "nenhum")
+    provedor = ("resend" if RESEND_API_KEY else
+                "brevo-api" if BREVO_API_KEY else
+                ("smtp:" + SMTP_HOST) if SMTP_HOST else "nenhum")
     try:
         _enviar_email_impl("Repactua — teste de e-mail",
                            "Teste de envio do Repactua — se você recebeu, o e-mail está funcionando! 🎉",
