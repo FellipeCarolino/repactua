@@ -1975,6 +1975,7 @@ def _admin_page(titulo, conteudo, ativo="dash", extra_js=""):
         ("assin", "/admin/assinantes", "👥", "Assinantes"),
         ("fin", "/admin/financeiro", "💰", "Financeiro"),
         ("logs", "/admin/logs", "📜", "Atividades"),
+        ("bkp", "/admin/backup.json", "💾", "Backup"),
         ("sub", "/admin/subconta", "🏦", "Subconta"),
         ("wh", "/admin/configurar-webhook", "🔗", "Webhook"),
         ("calc", "/calculadora", "🧮", "Calculadora"),
@@ -2017,6 +2018,7 @@ def admin():
     """Dashboard: visão geral do negócio (receita, contas, uso de IA, casos)."""
     if not _admin_logado():
         return redirect(url_for("admin_login"))
+    _backup_automatico_semanal()  # backup por e-mail 1x/semana, sem cron
     mes_atual = datetime.utcnow().strftime("%Y-%m")
     orgs = Escritorio.query.all()
     ativos = sum(1 for o in orgs if o.status == "ativo")
@@ -2362,6 +2364,88 @@ def admin_excluir(uid):
     db.session.commit()
     _log_admin("excluiu conta/login", u.email)
     return redirect(url_for("admin_assinantes"))
+
+
+def _gerar_backup_json():
+    """Exporta todas as tabelas do negócio em JSON (para guarda/restauração)."""
+    def dt(v):
+        return v.isoformat() if v else None
+    dados = {
+        "gerado_em": datetime.utcnow().isoformat() + "Z",
+        "escritorios": [{
+            "id": o.id, "nome": o.nome, "plano": o.plano, "status": o.status,
+            "asaas_customer_id": o.asaas_customer_id,
+            "asaas_subscription_id": o.asaas_subscription_id,
+            "max_membros": o.max_membros, "creditos_total": o.creditos_total,
+            "timbre": o.timbre, "telefone": o.telefone, "cidade": o.cidade,
+            "uf": o.uf, "acesso_ate": dt(o.acesso_ate), "criado_em": dt(o.criado_em),
+        } for o in Escritorio.query.all()],
+        "usuarios": [{
+            "id": u.id, "email": u.email, "senha_hash": u.senha_hash, "nome": u.nome,
+            "escritorio": u.escritorio, "oab": u.oab, "status": u.status,
+            "is_admin": u.is_admin, "usage_mes": u.usage_mes,
+            "usage_contagem": u.usage_contagem, "org_id": u.org_id, "papel": u.papel,
+            "cota_mensal": u.cota_mensal, "aviso_trial": u.aviso_trial,
+            "criado_em": dt(u.criado_em),
+        } for u in User.query.all()],
+        "casos": [{
+            "id": c.id, "org_id": c.org_id, "user_id": c.user_id, "nome": c.nome,
+            "payload": c.payload, "criado_em": dt(c.criado_em),
+            "atualizado_em": dt(c.atualizado_em),
+        } for c in Caso.query.all()],
+        "logs_admin": [{
+            "quando": dt(l.quando), "admin": l.admin_email,
+            "acao": l.acao, "alvo": l.alvo,
+        } for l in LogAdmin.query.order_by(LogAdmin.quando.desc()).limit(500).all()],
+    }
+    return json.dumps(dados, ensure_ascii=False, indent=1)
+
+
+@app.route("/admin/backup.json")
+def admin_backup():
+    """Baixa o backup completo em JSON."""
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    conteudo = _gerar_backup_json()
+    _log_admin("baixou backup manual")
+    nome = "repactua-backup-" + datetime.utcnow().strftime("%Y%m%d-%H%M") + ".json"
+    return Response(conteudo, mimetype="application/json; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename={nome}"})
+
+
+def _backup_automatico_semanal():
+    """Envia backup por e-mail 1x/semana (disparado quando o admin abre o painel)."""
+    try:
+        ultimo = LogAdmin.query.filter_by(acao="backup automático enviado").order_by(
+            LogAdmin.quando.desc()).first()
+        if ultimo and ultimo.quando and            (datetime.utcnow() - ultimo.quando) < timedelta(days=7):
+            return
+        if not (RESEND_API_KEY and email_ativo()):
+            return
+        conteudo = _gerar_backup_json()
+        anexo_b64 = base64.b64encode(conteudo.encode("utf-8")).decode("ascii")
+        nome = "repactua-backup-" + datetime.utcnow().strftime("%Y%m%d") + ".json"
+        payload = {
+            "from": f"Repactua <{SMTP_FROM}>",
+            "to": [ALERTA_EMAIL or ADMIN_EMAIL],
+            "subject": "💾 Backup semanal do Repactua",
+            "text": ("Backup automático semanal do banco do Repactua em anexo (JSON).\n"
+                     "Guarde este arquivo em local seguro."),
+            "attachments": [{"filename": nome, "content": anexo_b64}],
+        }
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=json.dumps(payload).encode("utf-8"), method="POST",
+            headers={"Authorization": "Bearer " + RESEND_API_KEY,
+                     "Content-Type": "application/json",
+                     "User-Agent": "Repactua/1.0"})
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+        db.session.add(LogAdmin(admin_email="sistema", acao="backup automático enviado",
+                                alvo=nome))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _admin_testar_email_impl():
