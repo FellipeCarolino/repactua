@@ -2507,6 +2507,7 @@
     if (dividas.length > 0) {
       const baseParcela = Math.max(parcelaSugerida, 0);
       const proporcional = baseParcela > 0 && totalSaldo > 0;
+      const mesesDefault = (mesesPlano && isFinite(mesesPlano) && mesesPlano > 0) ? mesesPlano : PRAZO_MAX;
       let acumulado = 0;
       dividas.forEach((d, idx) => {
         const saldo = d.saldoCents || 0;
@@ -2520,12 +2521,15 @@
             acumulado += fatia;
           }
         }
+        fatia = Math.max(fatia, 0);
         distribuicao.push({
           credor: d.credor || 'Credor',
           tipo: getTipo(d.tipo).label,
           saldo: saldo,
           pctSaldo: pctSaldo,
-          fatia: Math.max(fatia, 0),
+          fatia: fatia,
+          meses: mesesDefault,
+          total: fatia * mesesDefault,
         });
       });
     }
@@ -2738,11 +2742,11 @@
       <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">A parcela legal deve ficar entre 30% e 35% da renda líquida e quitar em até 60 meses. Você pode <b>editar a parcela</b> no quadro acima — o sistema recalcula prazo e divisão por credor, limita ao teto legal de 35% e, se a parcela invadir o mínimo existencial, exibe a fundamentação jurídica necessária (sem travar seu trabalho).</p>
 
       ${distribuicao.length ? `
-      <h4 style="font-size:0.9rem;font-weight:700;color:var(--primary);margin:20px 0 10px">📊 Divisão da parcela por credor <span style="font-weight:400;color:var(--text-muted);font-size:0.8rem">— edite cada valor conforme a negociação</span></h4>
+      <h4 style="font-size:0.9rem;font-weight:700;color:var(--primary);margin:20px 0 10px">📊 Divisão da parcela por credor <span style="font-weight:400;color:var(--text-muted);font-size:0.8rem">— edite parcela e meses conforme a negociação</span></h4>
       <div style="overflow-x:auto">
-        <table>
+        <table style="min-width:680px">
           <thead><tr>
-            <th>Credor</th><th class="td-right">Saldo devedor</th><th class="td-right">% do passivo</th><th class="td-right">✏️ Parcela/mês</th>
+            <th>Credor</th><th class="td-right">Saldo devedor</th><th class="td-right">% do passivo</th><th class="td-right">✏️ Parcela/mês</th><th class="td-right">✏️ Meses</th><th class="td-right">Total a pagar</th>
           </tr></thead>
           <tbody id="tbDistrib">
             ${distribuicao.map((x, i) => `
@@ -2751,7 +2755,10 @@
                 <td class="td-right">${fmtCents(x.saldo)}</td>
                 <td class="td-right">${pct(x.pctSaldo)}</td>
                 <td class="td-right"><input type="text" inputmode="numeric" id="distrib_${i}" value="${fmtCentsPlain(x.fatia)}" oninput="mascararDistrib(this)"
-                  style="width:118px;text-align:right;font-weight:700;color:var(--primary);border:1.5px dashed #c8d4e2;border-radius:7px;padding:6px 8px;background:#fafbfd"></td>
+                  style="width:110px;text-align:right;font-weight:700;color:var(--primary);border:1.5px dashed #c8d4e2;border-radius:7px;padding:6px 8px;background:#fafbfd"></td>
+                <td class="td-right"><input type="text" inputmode="numeric" id="distribM_${i}" value="${x.meses}" oninput="mascararMeses(this)"
+                  style="width:62px;text-align:center;font-weight:700;color:#1a3a5c;border:1.5px dashed #c8d4e2;border-radius:7px;padding:6px 6px;background:#fafbfd"></td>
+                <td class="td-right"><strong id="distribT_${i}" style="color:#1e7e34">${fmtCents(x.total)}</strong></td>
               </tr>`).join('')}
           </tbody>
           <tfoot><tr class="subtotal-row">
@@ -2759,10 +2766,12 @@
             <td class="td-right"><strong>${fmtCents(totalSaldo)}</strong></td>
             <td class="td-right"><strong>100%</strong></td>
             <td class="td-right"><strong id="distribTotalParcela">${fmtCents(parcelaSugerida)}</strong></td>
+            <td class="td-right">—</td>
+            <td class="td-right"><strong id="distribTotalGeral" style="color:#1e7e34">${fmtCents(distribuicao.reduce((s, x) => s + x.total, 0))}</strong></td>
           </tr></tfoot>
         </table>
       </div>
-      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">Comece pela divisão proporcional ao saldo e <b>ajuste manualmente a parcela de cada credor</b> — o total (soma) atualiza o plano e os avisos legais automaticamente. Editar a parcela geral acima redistribui de novo proporcionalmente. Pronta para a audiência de conciliação (art. 104-A CDC).</p>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px"><b>Parcela/mês</b>: quanto o cliente paga por mês a cada credor. <b>Meses</b>: em quantas parcelas. <b>Total a pagar</b>: o valor final proposto a cada credor (parcela × meses) — compare com o saldo devedor para propor abatimento/quitação. Ajuste manualmente conforme a negociação; o total (soma das parcelas) atualiza o plano e os avisos legais. Pronta para a audiência de conciliação (art. 104-A CDC).</p>
       ` : ''}`;
 
     // ---- Contexto Social ----
@@ -3000,6 +3009,14 @@
     aplicarParcelaEscolhida(false, false);
   }
 
+  // Edição dos MESES de um credor → recalcula o total a pagar (parcela × meses)
+  function mascararMeses(el) {
+    const v = parseInt((el.value || '').replace(/\D/g, ''), 10);
+    el.value = isNaN(v) ? '' : v;
+    // não altera as parcelas nem o plano — só recalcula os totais e propaga
+    aplicarParcelaEscolhida(false, false);
+  }
+
   function aplicarParcelaEscolhida(redistribuir = true, clampar = true) {
     if (!PLANO_CTX) return;
     const el = document.getElementById('parcelaEscolhida');
@@ -3100,6 +3117,18 @@
       }
       const tot = document.getElementById('distribTotalParcela');
       if (tot) tot.textContent = fmtCents(cents);
+      // meses (editável) e total a pagar por credor
+      let somaTotal = 0;
+      distribuicao.forEach((x, idx) => {
+        const mEl = document.getElementById('distribM_' + idx);
+        x.meses = mEl ? Math.max(parseInt(mEl.value, 10) || 0, 0) : 0;
+        x.total = x.fatia * x.meses;
+        somaTotal += x.total;
+        const tEl = document.getElementById('distribT_' + idx);
+        if (tEl) tEl.textContent = fmtCents(x.total);
+      });
+      const gEl = document.getElementById('distribTotalGeral');
+      if (gEl) gEl.textContent = fmtCents(somaTotal);
     }
 
     // --- Propaga para a minuta de petição e o relatório PDF ---
@@ -3385,9 +3414,13 @@
     ].join('\n');
 
     // Divisão da parcela por credor (para a proposta de plano)
-    const distribuicaoLista = (c.distribuicao || []).map((x, i) =>
-      `   ${i + 1}. ${x.credor} (${x.tipo}): ${fmtCents(x.fatia)}/mês — ${pct(x.pctSaldo)} do passivo;`
-    ).join('\n');
+    const distribuicaoLista = (c.distribuicao || []).map((x, i) => {
+      const m = x.meses || 0;
+      const total = (x.total != null) ? x.total : (x.fatia || 0) * m;
+      const prazoTxt = m ? ` durante ${m} ${m === 1 ? 'mês' : 'meses'} (total de ${fmtCents(total)}` +
+        (x.saldo ? `, correspondente a ${pct(x.saldo ? (total / x.saldo) * 100 : 0)} do saldo devedor de ${fmtCents(x.saldo)}` : '') + ')' : '';
+      return `   ${i + 1}. ${x.credor} (${x.tipo}): ${fmtCents(x.fatia)}/mês${prazoTxt};`;
+    }).join('\n');
 
     // Cenários de parcela (para fundamentar a tese escolhida)
     const cenariosLista = (c.cenarios || []).map(cn =>
