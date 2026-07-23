@@ -2500,24 +2500,31 @@
         pctRenda: r.rendaLiquida > 0 ? (parcelaPor60 / r.rendaLiquida) * 100 : 0 },
     ];
 
-    // ---- Divisão da parcela sugerida por credor (proporcional ao saldo) ----
+    // ---- Divisão da parcela por credor ----
+    // A tabela aparece SEMPRE que houver dívidas (mesmo se a parcela sugerida for 0,
+    // como no superendividamento grave) — o advogado então distribui manualmente.
     let distribuicao = [];
-    if (parcelaSugerida > 0 && totalSaldo > 0) {
+    if (dividas.length > 0) {
+      const baseParcela = Math.max(parcelaSugerida, 0);
+      const proporcional = baseParcela > 0 && totalSaldo > 0;
       let acumulado = 0;
       dividas.forEach((d, idx) => {
         const saldo = d.saldoCents || 0;
-        let fatia;
-        if (idx === dividas.length - 1) {
-          fatia = parcelaSugerida - acumulado; // última recebe o ajuste do arredondamento
-        } else {
-          fatia = Math.round(parcelaSugerida * (saldo / totalSaldo));
-          acumulado += fatia;
+        const pctSaldo = totalSaldo > 0 ? (saldo / totalSaldo) * 100 : (100 / dividas.length);
+        let fatia = 0;
+        if (proporcional) {
+          if (idx === dividas.length - 1) {
+            fatia = baseParcela - acumulado; // última recebe o ajuste do arredondamento
+          } else {
+            fatia = Math.round(baseParcela * (saldo / totalSaldo));
+            acumulado += fatia;
+          }
         }
         distribuicao.push({
           credor: d.credor || 'Credor',
           tipo: getTipo(d.tipo).label,
           saldo: saldo,
-          pctSaldo: (saldo / totalSaldo) * 100,
+          pctSaldo: pctSaldo,
           fatia: Math.max(fatia, 0),
         });
       });
