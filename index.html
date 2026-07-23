@@ -2746,14 +2746,14 @@
       <div style="overflow-x:auto">
         <table style="min-width:680px">
           <thead><tr>
-            <th>Credor</th><th class="td-right">Saldo devedor</th><th class="td-right">% do passivo</th><th class="td-right">✏️ Parcela/mês</th><th class="td-right">✏️ Meses</th><th class="td-right">Total a pagar</th>
+            <th>Credor</th><th class="td-right">Saldo devedor</th><th class="td-right">% da parcela</th><th class="td-right">✏️ Parcela/mês</th><th class="td-right">✏️ Meses</th><th class="td-right">Total a pagar</th>
           </tr></thead>
           <tbody id="tbDistrib">
             ${distribuicao.map((x, i) => `
               <tr>
                 <td><strong>${x.credor}</strong><br><span style="font-size:0.78rem;color:var(--text-muted)">${x.tipo}</span></td>
-                <td class="td-right">${fmtCents(x.saldo)}</td>
-                <td class="td-right">${pct(x.pctSaldo)}</td>
+                <td class="td-right">${fmtCents(x.saldo)}<br><span style="font-size:0.72rem;color:var(--text-muted)">${pct(x.pctSaldo)} do passivo</span></td>
+                <td class="td-right" id="distribPct_${i}">${parcelaSugerida > 0 ? pct(x.fatia / parcelaSugerida * 100) : '—'}</td>
                 <td class="td-right"><input type="text" inputmode="numeric" id="distrib_${i}" value="${fmtCentsPlain(x.fatia)}" oninput="mascararDistrib(this)"
                   style="width:110px;text-align:right;font-weight:700;color:var(--primary);border:1.5px dashed #c8d4e2;border-radius:7px;padding:6px 8px;background:#fafbfd"></td>
                 <td class="td-right"><input type="text" inputmode="numeric" id="distribM_${i}" value="${x.meses}" oninput="mascararMeses(this)"
@@ -2771,7 +2771,7 @@
           </tr></tfoot>
         </table>
       </div>
-      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px"><b>Parcela/mês</b>: quanto o cliente paga por mês a cada credor. <b>Meses</b>: em quantas parcelas. <b>Total a pagar</b>: o valor final proposto a cada credor (parcela × meses) — compare com o saldo devedor para propor abatimento/quitação. Ajuste manualmente conforme a negociação; o total (soma das parcelas) atualiza o plano e os avisos legais. Pronta para a audiência de conciliação (art. 104-A CDC).</p>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px"><b>% da parcela</b>: a fatia do pagamento mensal que vai para cada credor (muda quando você edita as parcelas). O texto <i>“X% do passivo”</i> abaixo do saldo é fixo — é o peso da dívida daquele credor no total, usado para justificar a divisão proporcional. <b>Parcela/mês</b>: quanto o cliente paga por mês a cada credor. <b>Meses</b>: em quantas parcelas. <b>Total a pagar</b>: o valor final proposto a cada credor (parcela × meses) — compare com o saldo devedor para propor abatimento/quitação. Ajuste manualmente conforme a negociação; o total (soma das parcelas) atualiza o plano e os avisos legais. Pronta para a audiência de conciliação (art. 104-A CDC).</p>
       ` : ''}`;
 
     // ---- Contexto Social ----
@@ -3126,6 +3126,9 @@
         somaTotal += x.total;
         const tEl = document.getElementById('distribT_' + idx);
         if (tEl) tEl.textContent = fmtCents(x.total);
+        // % da parcela (participação de cada credor no pagamento mensal) — reage às edições
+        const pEl = document.getElementById('distribPct_' + idx);
+        if (pEl) pEl.textContent = cents > 0 ? pct(x.fatia / cents * 100) : '—';
       });
       const gEl = document.getElementById('distribTotalGeral');
       if (gEl) gEl.textContent = fmtCents(somaTotal);
