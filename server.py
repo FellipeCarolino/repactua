@@ -126,7 +126,8 @@ def _enviar_email_impl(assunto, corpo, para=None):
             "https://api.resend.com/emails",
             data=json.dumps(payload).encode("utf-8"), method="POST",
             headers={"Authorization": "Bearer " + RESEND_API_KEY,
-                     "Content-Type": "application/json"})
+                     "Content-Type": "application/json",
+                     "User-Agent": "Repactua/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=20):
                 return True
@@ -143,7 +144,7 @@ def _enviar_email_impl(assunto, corpo, para=None):
             "https://api.brevo.com/v3/smtp/email",
             data=json.dumps(payload).encode("utf-8"), method="POST",
             headers={"api-key": BREVO_API_KEY, "Content-Type": "application/json",
-                     "Accept": "application/json"})
+                     "Accept": "application/json", "User-Agent": "Repactua/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=20):
                 return True
