@@ -1087,18 +1087,26 @@ def _registrar_visita():
         db.session.rollback()
 
 
+def _sem_cache(resp):
+    """Força o navegador a sempre buscar a versão mais nova do HTML."""
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
 @app.route("/")
 def index():
     if not current_user.is_authenticated:
         _registrar_visita()
-        return send_from_directory(BASE_DIR, "landing.html")
+        return _sem_cache(send_from_directory(BASE_DIR, "landing.html"))
     return render_home()
 
 
 @app.route("/calculadora")
 @login_required
 def calculadora():
-    return send_from_directory(BASE_DIR, "index.html")
+    return _sem_cache(send_from_directory(BASE_DIR, "index.html"))
 
 
 def render_home():
