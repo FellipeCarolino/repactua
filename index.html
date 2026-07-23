@@ -2731,19 +2731,20 @@
       <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">A parcela legal deve ficar entre 30% e 35% da renda líquida e quitar em até 60 meses. Você pode <b>editar a parcela</b> no quadro acima — o sistema recalcula prazo e divisão por credor, limita ao teto legal de 35% e, se a parcela invadir o mínimo existencial, exibe a fundamentação jurídica necessária (sem travar seu trabalho).</p>
 
       ${distribuicao.length ? `
-      <h4 style="font-size:0.9rem;font-weight:700;color:var(--primary);margin:20px 0 10px">📊 Divisão da parcela por credor</h4>
+      <h4 style="font-size:0.9rem;font-weight:700;color:var(--primary);margin:20px 0 10px">📊 Divisão da parcela por credor <span style="font-weight:400;color:var(--text-muted);font-size:0.8rem">— edite cada valor conforme a negociação</span></h4>
       <div style="overflow-x:auto">
         <table>
           <thead><tr>
-            <th>Credor</th><th class="td-right">Saldo devedor</th><th class="td-right">% do passivo</th><th class="td-right">Parcela proposta/mês</th>
+            <th>Credor</th><th class="td-right">Saldo devedor</th><th class="td-right">% do passivo</th><th class="td-right">✏️ Parcela/mês</th>
           </tr></thead>
           <tbody id="tbDistrib">
-            ${distribuicao.map(x => `
+            ${distribuicao.map((x, i) => `
               <tr>
                 <td><strong>${x.credor}</strong><br><span style="font-size:0.78rem;color:var(--text-muted)">${x.tipo}</span></td>
                 <td class="td-right">${fmtCents(x.saldo)}</td>
                 <td class="td-right">${pct(x.pctSaldo)}</td>
-                <td class="td-right"><strong style="color:var(--primary)">${fmtCents(x.fatia)}</strong></td>
+                <td class="td-right"><input type="text" inputmode="numeric" id="distrib_${i}" value="${fmtCentsPlain(x.fatia)}" oninput="mascararDistrib(this)"
+                  style="width:118px;text-align:right;font-weight:700;color:var(--primary);border:1.5px dashed #c8d4e2;border-radius:7px;padding:6px 8px;background:#fafbfd"></td>
               </tr>`).join('')}
           </tbody>
           <tfoot><tr class="subtotal-row">
@@ -2754,7 +2755,7 @@
           </tr></tfoot>
         </table>
       </div>
-      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">Divisão proporcional ao saldo de cada credor — recalculada automaticamente quando você edita a parcela. Pronta para a audiência de conciliação (art. 104-A CDC).</p>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px">Comece pela divisão proporcional ao saldo e <b>ajuste manualmente a parcela de cada credor</b> — o total (soma) atualiza o plano e os avisos legais automaticamente. Editar a parcela geral acima redistribui de novo proporcionalmente. Pronta para a audiência de conciliação (art. 104-A CDC).</p>
       ` : ''}`;
 
     // ---- Contexto Social ----
@@ -2972,7 +2973,27 @@
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  function aplicarParcelaEscolhida() {
+  // Edição manual da parcela de UM credor → o total do plano é a soma das parcelas
+  function mascararDistrib(el) {
+    const c = parseMoney(el.value);
+    el.value = c === 0 ? '' : fmtCentsPlain(c);
+    aplicarParcelasCredores();
+  }
+
+  function aplicarParcelasCredores() {
+    if (!PLANO_CTX || !PLANO_CTX.base.length) return;
+    let total = 0;
+    PLANO_CTX.base.forEach((b, i) => {
+      const el = document.getElementById('distrib_' + i);
+      if (el) total += parseMoney(el.value);
+    });
+    const campo = document.getElementById('parcelaEscolhida');
+    if (campo) campo.value = total > 0 ? fmtCentsPlain(total) : '';
+    // recalcula prazo/%/avisos SEM redistribuir e SEM clampar (mantém os valores manuais)
+    aplicarParcelaEscolhida(false, false);
+  }
+
+  function aplicarParcelaEscolhida(redistribuir = true, clampar = true) {
     if (!PLANO_CTX) return;
     const el = document.getElementById('parcelaEscolhida');
     if (!el) return;
@@ -2982,9 +3003,14 @@
 
     // --- Parâmetro inviolável: teto legal de 35% da renda líquida ---
     if (P.tetoLegal > 0 && cents > P.tetoLegal) {
-      cents = P.tetoLegal;
-      el.value = fmtCentsPlain(cents);
-      avisos.push(`⛔ <b>Limite do sistema:</b> a parcela foi ajustada ao teto de ${fmtCents(P.tetoLegal)} — 35% da renda líquida (parâmetro jurisprudencial máximo).`);
+      if (clampar) {
+        cents = P.tetoLegal;
+        el.value = fmtCentsPlain(cents);
+        avisos.push(`⛔ <b>Limite do sistema:</b> a parcela foi ajustada ao teto de ${fmtCents(P.tetoLegal)} — 35% da renda líquida (parâmetro jurisprudencial máximo).`);
+      } else {
+        // edição por credor: não clampa (não dá pra saber qual reduzir), mas avisa
+        avisos.push(`⛔ <b>Acima do teto legal:</b> a soma das parcelas (${fmtCents(cents)}) supera 35% da renda líquida (${fmtCents(P.tetoLegal)}). Reduza a parcela de algum credor.`);
+      }
     }
 
     // --- Mínimo existencial: avisa e fundamenta, sem travar o trabalho do advogado ---
@@ -3038,28 +3064,33 @@
       ? `<div class="alerta-inline" style="margin-top:12px;background:#f4f8ff;border-color:#9db8d8;color:#1a3a5c;font-size:0.82rem">${avisos.join('<br>')}</div>`
       : '';
 
-    // --- Redistribui por credor ---
+    // --- Divisão por credor ---
     let distribuicao = [];
-    if (cents > 0 && P.totalSaldo > 0 && P.base.length) {
-      let acumulado = 0;
-      P.base.forEach((b, idx) => {
-        let fatia;
-        if (idx === P.base.length - 1) {
-          fatia = cents - acumulado;
-        } else {
-          fatia = Math.round(cents * (b.saldo / P.totalSaldo));
-          acumulado += fatia;
-        }
-        distribuicao.push({ credor: b.credor, tipo: b.tipo, saldo: b.saldo, pctSaldo: b.pctSaldo, fatia: Math.max(fatia, 0) });
-      });
-      const tb = document.getElementById('tbDistrib');
-      if (tb) tb.innerHTML = distribuicao.map(x => `
-        <tr>
-          <td><strong>${x.credor}</strong><br><span style="font-size:0.78rem;color:var(--text-muted)">${x.tipo}</span></td>
-          <td class="td-right">${fmtCents(x.saldo)}</td>
-          <td class="td-right">${pct(x.pctSaldo)}</td>
-          <td class="td-right"><strong style="color:var(--primary)">${fmtCents(x.fatia)}</strong></td>
-        </tr>`).join('');
+    if (P.base.length) {
+      if (redistribuir && cents > 0 && P.totalSaldo > 0) {
+        // Edição da parcela GERAL → redistribui proporcionalmente ao saldo
+        let acumulado = 0;
+        P.base.forEach((b, idx) => {
+          let fatia;
+          if (idx === P.base.length - 1) {
+            fatia = cents - acumulado;
+          } else {
+            fatia = Math.round(cents * (b.saldo / P.totalSaldo));
+            acumulado += fatia;
+          }
+          fatia = Math.max(fatia, 0);
+          distribuicao.push({ credor: b.credor, tipo: b.tipo, saldo: b.saldo, pctSaldo: b.pctSaldo, fatia });
+          const inp = document.getElementById('distrib_' + idx);
+          if (inp) inp.value = fmtCentsPlain(fatia);  // reflete nos campos editáveis
+        });
+      } else {
+        // Edição por CREDOR (ou parcela zerada) → usa os valores manuais dos campos
+        P.base.forEach((b, idx) => {
+          const inp = document.getElementById('distrib_' + idx);
+          distribuicao.push({ credor: b.credor, tipo: b.tipo, saldo: b.saldo, pctSaldo: b.pctSaldo,
+            fatia: inp ? parseMoney(inp.value) : 0 });
+        });
+      }
       const tot = document.getElementById('distribTotalParcela');
       if (tot) tot.textContent = fmtCents(cents);
     }
@@ -3414,7 +3445,7 @@ Para subsidiar a fixação do plano, apresentam-se os seguintes cenários, todos
 
 ${cenariosLista}
 
-A parcela mensal proposta de ${fmtCents(c.parcelaSugerida)} será rateada entre os credores na proporção de seus saldos, nos seguintes valores:
+A parcela mensal proposta de ${fmtCents(c.parcelaSugerida)} será distribuída entre os credores nos seguintes valores:
 
 ${distribuicaoLista}
 
