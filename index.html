@@ -1300,6 +1300,17 @@
         <button class="btn btn-outline" style="margin-left:auto" onclick="adicionarDivida()">+ Adicionar Dívida</button>
       </div>
       <div class="card-body">
+        <div style="background:#eef4fb;border:1.5px dashed #2c5f8a;border-radius:10px;padding:14px 16px;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:230px">
+              <b style="color:#1a3a5c">🏦 Importar todas as dívidas de uma vez</b>
+              <div style="font-size:0.8rem;color:#5a6a7a;margin-top:2px">Envie o relatório de <b>Empréstimos e Financiamentos (SCR)</b> do Registrato/Banco Central — a IA extrai todos os credores, saldos e modalidades para você conferir.</div>
+            </div>
+            <button class="btn btn-primary" onclick="document.getElementById('fileRegistrato').click()">📄 Ler Registrato</button>
+            <input type="file" id="fileRegistrato" accept=".pdf,image/*" style="display:none" onchange="lerRegistratoIA(this)" />
+          </div>
+          <div id="iaRegistratoStatus"></div>
+        </div>
         <div class="debt-list" id="debtList"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-outline" onclick="adicionarDivida()">+ Adicionar Dívida</button>
@@ -2088,6 +2099,82 @@
       renderDividas();
       iaStatus(statusId, 'ok', 'Dados do contrato aplicados. Revise e clique em Calcular.');
     });
+  }
+
+  function conferirRegistrato(d) {
+    const dividasIA = (d.dividas || []).filter(x => x && (x.credor || x.saldo_devedor));
+    if (!dividasIA.length) {
+      iaStatus('iaRegistratoStatus', 'erro', 'Nenhuma dívida ativa foi identificada no relatório. Confira se o arquivo é o relatório de Empréstimos e Financiamentos (SCR) do Registrato.');
+      return;
+    }
+    const tipoSel = (i, sel) => `<select id="cfr_tipo_${i}" style="width:100%;font-size:0.8rem">${TIPOS_DIVIDA.map(t =>
+      `<option value="${t.value}" ${sel === t.value ? 'selected' : ''}>${t.label}</option>`).join('')}</select>`;
+    const linhas = dividasIA.map((x, i) => `
+      <tr>
+        <td style="text-align:center"><input type="checkbox" id="cfr_ok_${i}" checked style="width:18px;height:18px"></td>
+        <td>${_inText('cfr_cred_' + i, x.credor || 'Credor')}
+          ${x.vencido ? `<div style="font-size:0.72rem;color:#a3271a;margin-top:2px">vencido: ${fmtCents(reaisToCents(x.vencido))}</div>` : ''}</td>
+        <td>${tipoSel(i, x.tipo)}</td>
+        <td>${_inMoney('cfr_saldo_' + i, x.saldo_devedor)}</td>
+        <td>${_inMoney('cfr_par_' + i, x.parcela_mensal)}</td>
+        <td style="text-align:center"><input type="checkbox" id="cfr_folha_${i}" ${x.em_folha ? 'checked' : ''} style="width:18px;height:18px"></td>
+      </tr>`).join('');
+    const cab = [d.titular ? `<b>Titular:</b> ${escHtml(d.titular)}` : '',
+                 d.data_base ? `<b>Data-base:</b> ${escHtml(d.data_base)}` : '']
+                .filter(Boolean).join(' · ');
+    const obs = d.observacoes ? `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem">💡 <b>Observações da IA:</b> ${escHtml(d.observacoes)}</div>` : '';
+    const corpo = `
+      ${cab ? `<div style="font-size:0.85rem;color:#5a6a7a;margin-bottom:10px">${cab}</div>` : ''}
+      <div style="overflow-x:auto"><table style="width:100%;min-width:640px">
+        <thead><tr><th style="width:56px">Incluir</th><th>Credor</th><th style="width:160px">Tipo</th>
+        <th style="width:110px">Saldo devedor</th><th style="width:110px">Parcela/mês</th><th style="width:66px">Em folha</th></tr></thead>
+        <tbody>${linhas}</tbody>
+      </table></div>
+      <div class="alerta-inline" style="margin-top:12px;font-size:0.8rem;background:#fffbea;border-color:#e6c45a;color:#5a4000">
+        ⚠️ O SCR normalmente <b>não informa o valor da parcela mensal</b> — complete a coluna "Parcela/mês" com os valores reais (carnês, faturas, contratos) antes ou depois de aplicar. Saldos são os informados pelas instituições na data-base.
+      </div>
+      ${obs}`;
+    abrirConferIA(`🏦 Registrato lido — ${dividasIA.length} dívida(s) encontrada(s)`, corpo, () => {
+      const g = id => document.getElementById(id);
+      let n = 0;
+      dividasIA.forEach((x, i) => {
+        const ok = g('cfr_ok_' + i);
+        if (ok && ok.checked) {
+          adicionarDivida(
+            g('cfr_cred_' + i).value || 'Credor',
+            g('cfr_tipo_' + i).value,
+            parseMoney(g('cfr_saldo_' + i).value),
+            parseMoney(g('cfr_par_' + i).value),
+            g('cfr_folha_' + i).checked);
+          n++;
+        }
+      });
+      iaStatus('iaRegistratoStatus', 'ok', `${n} dívida(s) adicionada(s) a partir do Registrato. Complete as parcelas mensais que faltarem e clique em Calcular.`);
+    });
+  }
+
+  async function lerRegistratoIA(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (IA_OCUPADA) {
+      iaStatus('iaRegistratoStatus', 'erro', 'Já existe uma leitura em andamento — aguarde ela terminar.');
+      input.value = '';
+      return;
+    }
+    IA_OCUPADA = true;
+    iaStatus('iaRegistratoStatus', 'load', `Lendo "${file.name}" com IA… relatórios do Registrato podem levar um pouco mais.`);
+    try {
+      const d = await enviarDocumento('/api/extract-registrato', file);
+      iaStatus('iaRegistratoStatus', 'ok', 'Relatório lido! Confira as dívidas encontradas na janela e clique em "Aplicar".');
+      conferirRegistrato(d);
+    } catch (e) {
+      const msg = (e instanceof TypeError || e.semBackend) ? MSG_SEM_SERVIDOR : ('Não foi possível ler o relatório: ' + e.message);
+      iaStatus('iaRegistratoStatus', 'erro', msg);
+    } finally {
+      IA_OCUPADA = false;
+      input.value = '';
+      carregarConta();
+    }
   }
 
   async function lerHoleriteIA(input) {

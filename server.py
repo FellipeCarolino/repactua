@@ -489,6 +489,55 @@ PROMPT_HOLERITE = (
     "Se um campo não existir, retorne null. Não invente valores."
 )
 
+SCHEMA_REGISTRATO = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "titular": {"type": ["string", "null"]},
+        "data_base": {"type": ["string", "null"]},
+        "dividas": {
+            "type": "array",
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "credor": {"type": ["string", "null"]},
+                    "tipo": {"type": "string", "enum": TIPOS_DIVIDA},
+                    "saldo_devedor": {"type": ["number", "null"]},
+                    "parcela_mensal": {"type": ["number", "null"]},
+                    "em_folha": {"type": ["boolean", "null"]},
+                    "vencido": {"type": ["number", "null"]},
+                },
+                "required": ["credor", "tipo", "saldo_devedor", "parcela_mensal",
+                             "em_folha", "vencido"],
+            },
+        },
+        "observacoes": {"type": ["string", "null"]},
+    },
+    "required": ["titular", "data_base", "dividas", "observacoes"],
+}
+
+PROMPT_REGISTRATO = (
+    "Você é um analista jurídico-financeiro especializado no relatório de EMPRÉSTIMOS E "
+    "FINANCIAMENTOS (SCR) do Banco Central do Brasil, obtido pelo Registrato. "
+    "Extraia TODAS as operações de crédito ativas do titular, uma entrada por "
+    "instituição financeira + modalidade. "
+    "'credor' = nome da instituição financeira. "
+    "'saldo_devedor' = total devido na operação (some 'a vencer' + 'vencido' da carteira de crédito). "
+    "'vencido' = apenas a parcela vencida, se houver (senão null). "
+    "IMPORTANTE: NÃO inclua 'limite de crédito' disponível/contratado e não utilizado — "
+    "somente dívidas efetivas da carteira de crédito. Não inclua coobrigações/garantias prestadas "
+    "(cite-as em 'observacoes' se existirem). "
+    "'tipo' pela modalidade: empréstimo consignado → 'consignado' (e 'em_folha': true); "
+    "cartão de crédito (inclusive rotativo/parcelado) → 'cartao'; cheque especial/adiantamento a "
+    "depositante → 'cheque'; crédito pessoal sem consignação → 'emprestimo'; financiamento "
+    "habitacional → 'financiamento_imovel'; financiamento de veículos → 'financiamento_veiculo'; "
+    "demais modalidades → 'outro'. "
+    "'parcela_mensal' = valor da prestação mensal SOMENTE se constar expressamente no relatório "
+    "(o SCR normalmente não traz — nesse caso retorne null; NUNCA estime). "
+    "'data_base' = data-base do relatório. "
+    "Valores em reais como número decimal (ex.: 5800.50), sem 'R$' nem separador de milhar. "
+    "Se um campo não existir, retorne null. Não invente valores."
+)
+
 PROMPT_CONTRATO = (
     "Você é um analista jurídico-financeiro especializado em contratos de crédito brasileiros. "
     "Leia o contrato e extraia os dados da dívida. 'tipo' = o valor da lista que melhor descreve. "
@@ -1290,6 +1339,22 @@ def extract_contrato():
         return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
     try:
         dados = _extrair(PROMPT_CONTRATO, SCHEMA_CONTRATO, request.files["file"])
+        current_user.registrar_consulta()
+        return jsonify({"ok": True, "dados": dados, "restantes": current_user.consultas_restantes()})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+@app.route("/api/extract-registrato", methods=["POST"])
+@login_required
+def extract_registrato():
+    ok, erro = _checar_uso()
+    if not ok:
+        return jsonify({"ok": False, "erro": erro, "limite": True}), 402
+    if "file" not in request.files:
+        return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
+    try:
+        dados = _extrair(PROMPT_REGISTRATO, SCHEMA_REGISTRATO, request.files["file"])
         current_user.registrar_consulta()
         return jsonify({"ok": True, "dados": dados, "restantes": current_user.consultas_restantes()})
     except Exception as e:  # noqa: BLE001
