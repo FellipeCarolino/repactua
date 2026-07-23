@@ -918,7 +918,8 @@
     <div class="modal-body">
       <div style="display:flex;gap:10px;margin-bottom:18px">
         <input type="text" id="nomeCaso" placeholder="Nome do caso (ex.: João da Silva — repactuação)" style="flex:1" />
-        <button class="btn btn-primary" onclick="salvarCaso()">💾 Salvar atual</button>
+        <button class="btn btn-primary" onclick="salvarCaso()">💾 Salvar como novo</button>
+        <button class="btn btn-outline" id="btnAtualizarCaso" style="display:none" onclick="atualizarCasoAberto()">🔄 Atualizar caso aberto</button>
       </div>
       <div id="listaCasos"></div>
       <p style="font-size:0.75rem;color:var(--text-muted);margin-top:12px">Os casos ficam salvos no servidor e são compartilhados pelo escritório — acessíveis de qualquer computador. Ao carregar um caso, os dados atuais do formulário são substituídos.</p>
@@ -2629,6 +2630,7 @@
     // ---- Plano de Pagamento Sugerido (com parcela EDITÁVEL) ----
     PLANO_CTX = {
       totalSaldo, rendaLiquida: r.rendaLiquida, cap30, cap35,
+      comprometimentoMensal, comprometimentoPct,
       tetoLegal: cap35,                                    // limite duro: 35% da renda líquida
       tetoEstrito: Math.min(cap35, Math.max(rendaDisponivel, 0)),  // o que sobra preservando o mínimo adotado
       rendaDisponivel, parcelaPor60, parcelaSistema: parcelaSugerida, PRAZO_MAX,
@@ -2636,7 +2638,22 @@
     };
     const planoStatusCor = planoViavel ? '#1e7e34' : '#c0392b';
     const planoStatusBg = planoViavel ? '#edfbf0' : '#fdecea';
+    const ecoMensal = Math.max(comprometimentoMensal - parcelaSugerida, 0);
     document.getElementById('planoConteudo').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:stretch;margin-bottom:18px">
+        <div style="background:#fdecea;border:1.5px solid #e8a49a;border-radius:12px;padding:16px;text-align:center">
+          <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#7a2218">Hoje o consumidor paga</div>
+          <div style="font-size:1.5rem;font-weight:800;color:#a3271a;margin:4px 0">${fmtCents(comprometimentoMensal)}<span style="font-size:.8rem;font-weight:600">/mês</span></div>
+          <div style="font-size:0.78rem;color:#7a2218">${pct(comprometimentoPct)} da renda líquida · consignados + parcelas</div>
+        </div>
+        <div style="display:flex;align-items:center;font-size:1.6rem;color:var(--primary)">➜</div>
+        <div style="background:#edfbf0;border:1.5px solid #7ec891;border-radius:12px;padding:16px;text-align:center">
+          <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#1b5e20">Com o plano proposto</div>
+          <div style="font-size:1.5rem;font-weight:800;color:#1e7e34;margin:4px 0" id="cmpPropVal">${fmtCents(parcelaSugerida)}<span style="font-size:.8rem;font-weight:600">/mês</span></div>
+          <div style="font-size:0.78rem;color:#1b5e20" id="cmpPropSub">${pct(parcelaSugeridaPct)} da renda líquida${mesesPlano ? ' · quita em ' + mesesPlano + ' meses' : ''}</div>
+        </div>
+      </div>
+      <div style="text-align:center;margin:-6px 0 16px;font-size:0.85rem;color:var(--text-muted)" id="cmpEco">${ecoMensal > 0 ? '💰 Alívio mensal no orçamento: <b style="color:#1e7e34">' + fmtCents(ecoMensal) + '</b> — argumento central para a conciliação (art. 104-A CDC).' : ''}</div>
       <div class="plano-grid">
         <div class="plano-box"><div class="plano-lbl">Total do passivo</div><div class="plano-val">${fmtCents(totalSaldo)}</div></div>
         <div class="plano-box"><div class="plano-lbl">Prazo legal máximo</div><div class="plano-val">${PRAZO_MAX} meses</div><div class="plano-sub">art. 104-B, §4º, CDC</div></div>
@@ -2957,6 +2974,15 @@
       `${pct(pctRenda)} da renda líquida${naFaixa ? ' ✓ (faixa 30–35%)' : ''}`;
     const prazoEl = document.getElementById('planoPrazoVal');
     if (prazoEl) prazoEl.textContent = meses === null ? 'Inviável' : meses + ' meses';
+    const cmpV = document.getElementById('cmpPropVal');
+    if (cmpV) cmpV.innerHTML = fmtCents(cents) + '<span style="font-size:.8rem;font-weight:600">/mês</span>';
+    const cmpS = document.getElementById('cmpPropSub');
+    if (cmpS) cmpS.textContent = pct(pctRenda) + ' da renda líquida' + (meses ? ' · quita em ' + meses + ' meses' : '');
+    const cmpE = document.getElementById('cmpEco');
+    if (cmpE) {
+      const eco = Math.max((P.comprometimentoMensal || 0) - cents, 0);
+      cmpE.innerHTML = eco > 0 ? '💰 Alívio mensal no orçamento: <b style="color:#1e7e34">' + fmtCents(eco) + '</b> — argumento central para a conciliação (art. 104-A CDC).' : '';
+    }
     const remSub = document.getElementById('planoRemicaoSub');
     if (remSub) remSub.textContent = (meses !== null && meses > P.PRAZO_MAX)
       ? `p/ ${P.PRAZO_MAX} meses: remir ${fmtCents(P.totalSaldo - cents * P.PRAZO_MAX)}` : '';
@@ -3107,21 +3133,53 @@
 
   // Casos salvos NO SERVIDOR (compartilhados pelo escritório, acessíveis de qualquer máquina)
   let CASOS_CACHE = [];
+  let CASO_ABERTO = null;  // {id, nome} do caso carregado/salvo — habilita "Atualizar"
+
+  function _setCasoAberto(c) {
+    CASO_ABERTO = c;
+    const btn = document.getElementById('btnAtualizarCaso');
+    if (btn) {
+      btn.style.display = c ? 'inline-flex' : 'none';
+      if (c) btn.textContent = '🔄 Atualizar: ' + (c.nome.length > 26 ? c.nome.slice(0, 26) + '…' : c.nome);
+    }
+  }
+
+  function _corpoCasoAtual(nomeCaso) {
+    const dados = {};
+    CAMPOS_FORMULARIO.forEach(id => dados[id] = document.getElementById(id).value);
+    return {
+      nomeCaso,
+      dados,
+      dividas: dividas.map(d => ({ credor: d.credor, tipo: d.tipo, saldoCents: d.saldoCents, parcelaCents: d.parcelaCents, emFolha: d.emFolha, parcContratadas: d.parcContratadas, parcPagas: d.parcPagas })),
+    };
+  }
+
+  async function atualizarCasoAberto() {
+    if (!CASO_ABERTO) return;
+    const nomeNovo = document.getElementById('nomeCaso').value.trim() || CASO_ABERTO.nome;
+    try {
+      const r = await fetch('/api/casos/' + CASO_ABERTO.id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(_corpoCasoAtual(nomeNovo)),
+      });
+      if (!r.ok) throw new Error();
+      _setCasoAberto({ id: CASO_ABERTO.id, nome: nomeNovo });
+      document.getElementById('nomeCaso').value = '';
+      await listarCasos();
+    } catch {
+      alert('Não foi possível atualizar o caso. Verifique sua conexão.');
+    }
+  }
 
   async function salvarCaso() {
     const nomeCaso = document.getElementById('nomeCaso').value.trim()
       || document.getElementById('nome').value.trim()
       || 'Caso sem nome';
-    const dados = {};
-    CAMPOS_FORMULARIO.forEach(id => dados[id] = document.getElementById(id).value);
-    const body = {
-      nomeCaso,
-      dados,
-      dividas: dividas.map(d => ({ credor: d.credor, tipo: d.tipo, saldoCents: d.saldoCents, parcelaCents: d.parcelaCents, emFolha: d.emFolha, parcContratadas: d.parcContratadas, parcPagas: d.parcPagas })),
-    };
     try {
-      const r = await fetch('/api/casos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const r = await fetch('/api/casos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(_corpoCasoAtual(nomeCaso)) });
       if (!r.ok) throw new Error();
+      const j = await r.json().catch(() => null);
+      if (j && j.id) _setCasoAberto({ id: j.id, nome: nomeCaso });
       document.getElementById('nomeCaso').value = '';
       await listarCasos();
     } catch {
@@ -3145,6 +3203,7 @@
     alternarIR();
     atualizarLabelsAno();
     fecharModal('modalCasos');
+    _setCasoAberto({ id: caso.id, nome: caso.nomeCaso });
     document.getElementById('resultado').style.display = 'none';
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -3384,6 +3443,7 @@ ${advLinha || '[Advogado(a) — OAB]'}`;
     document.getElementById('resultado').style.display = 'none';
     document.getElementById('peticaoSection').style.display = 'none';
     ultimoCalculo = null;
+    _setCasoAberto(null);
     recalcDespesas();
     aplicarAno();
     alternarIR();

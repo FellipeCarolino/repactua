@@ -1275,6 +1275,22 @@ def casos_salvar():
     return jsonify({"ok": True, "id": caso.id})
 
 
+@app.route("/api/casos/<int:cid>", methods=["PUT"])
+@login_required
+def casos_atualizar(cid):
+    c = db.session.get(Caso, cid)
+    if not c or (current_user.org_id and c.org_id != current_user.org_id) or \
+       (not current_user.org_id and c.user_id != current_user.id):
+        return jsonify({"ok": False, "erro": "Caso não encontrado."}), 404
+    body = request.get_json(silent=True) or {}
+    if body.get("nomeCaso"):
+        c.nome = body["nomeCaso"].strip()[:255]
+    c.payload = json.dumps({"dados": body.get("dados", {}), "dividas": body.get("dividas", [])})
+    c.atualizado_em = datetime.utcnow()
+    db.session.commit()
+    return jsonify({"ok": True, "id": c.id})
+
+
 @app.route("/api/casos/<int:cid>", methods=["DELETE"])
 @login_required
 def casos_excluir(cid):
