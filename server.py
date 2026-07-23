@@ -332,6 +332,14 @@ def _log_admin(acao, alvo=""):
         db.session.rollback()
 
 
+class Visita(db.Model):
+    """Visita à landing (analytics próprio, sem cookies e sem IP)."""
+    __tablename__ = "visita"
+    id = db.Column(db.Integer, primary_key=True)
+    quando = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    origem = db.Column(db.String(200))
+
+
 class Caso(db.Model):
     """Caso salvo de análise — fica no servidor, compartilhado pelo escritório."""
     __tablename__ = "caso"
@@ -979,9 +987,25 @@ def pagina_privacidade():
 # ============================================================
 # Rotas — Aplicação
 # ============================================================
+def _registrar_visita():
+    try:
+        utm = (request.args.get("utm_source") or "").strip()[:80]
+        ref = (request.referrer or "").strip()
+        origem = "direta"
+        if utm:
+            origem = "utm:" + utm
+        elif ref and "repactua.com.br" not in ref:
+            origem = ref.split("//")[-1].split("/")[0][:120]
+        db.session.add(Visita(origem=origem))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 @app.route("/")
 def index():
     if not current_user.is_authenticated:
+        _registrar_visita()
         return send_from_directory(BASE_DIR, "landing.html")
     return render_home()
 
@@ -2033,6 +2057,14 @@ def admin():
     total_casos = Caso.query.count()
     total_users = User.query.count()
     conv_pct = round(pagantes * 100 / len(orgs)) if orgs else 0
+    agora = datetime.utcnow()
+    v_hoje = Visita.query.filter(Visita.quando >= agora.replace(hour=0, minute=0, second=0)).count()
+    v_7d = Visita.query.filter(Visita.quando >= agora - timedelta(days=7)).count()
+    v_30d = Visita.query.filter(Visita.quando >= agora - timedelta(days=30)).count()
+    top = db.session.query(Visita.origem, db.func.count(Visita.id)).filter(
+        Visita.quando >= agora - timedelta(days=30)).group_by(Visita.origem).order_by(
+        db.func.count(Visita.id).desc()).first()
+    origem_top = f"{top[0]} ({top[1]})" if top else "—"
     ja_ativas = pagantes + inativos  # aproximação: quem já esteve/está no jogo pago
     churn_pct = round(inativos * 100 / ja_ativas) if ja_ativas else 0
 
@@ -2099,6 +2131,8 @@ def admin():
       <div class="mc"><div class="lbl">Usuários (logins)</div><div class="val">{total_users}</div></div>
       <div class="mc"><div class="lbl">Consultas IA no mês</div><div class="val">{uso_ia}</div></div>
       <div class="mc"><div class="lbl">Casos salvos</div><div class="val">{total_casos}</div></div>
+      <div class="mc ouro"><div class="lbl">Visitas na landing (7d)</div><div class="val">{v_7d}</div><div class="det">hoje {v_hoje} · 30d {v_30d}</div></div>
+      <div class="mc"><div class="lbl">Origem top (30d)</div><div class="val" style="font-size:.95rem;line-height:1.3">{origem_top}</div><div class="det">utm_source ou site de origem</div></div>
     </div>
     <div class="duas">
       <div><h2>📈 Receita recebida (6 meses)</h2>
