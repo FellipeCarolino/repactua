@@ -1498,6 +1498,7 @@
     <div class="actions">
       <button class="btn btn-accent btn-lg" onclick="imprimirRelatorio()">🖨️ Imprimir / Salvar PDF</button>
       <button class="btn btn-primary btn-lg" onclick="gerarPeticao()">📄 Gerar Minuta de Petição</button>
+      <button class="btn btn-outline btn-lg" id="btnRevisional" style="display:none;border-color:#a3271a;color:#a3271a" onclick="gerarPeticaoRevisional()">⚖️ Minuta Revisional (consignados)</button>
       <button class="btn btn-outline btn-lg" onclick="document.getElementById('nomeCaso').value=''; abrirModal('modalCasos'); listarCasos()">💾 Salvar Caso</button>
       <button class="btn btn-outline btn-lg" onclick="limpar()">🔄 Nova Consulta</button>
     </div>
@@ -1967,6 +1968,7 @@
   // CONFERÊNCIA DOS DADOS DA IA — o advogado revisa/corrige antes de aplicar
   // ============================================================
   let CONFER_IA_APLICAR = null;
+  let HOLERITES_LIDOS = [];  // valores (em cents) de cada holerite aplicado — p/ renda variável (média)
 
   const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -2020,7 +2022,18 @@
     ];
     const irSelect = `<select id="cfh_sitIR" style="width:100%;margin-top:6px;font-size:0.8rem">${IR_OPCOES.map(o =>
       `<option value="${o.v}" ${o.v === sitPre ? 'selected' : ''}>${o.l}</option>`).join('')}</select>`;
+    const blocoModo = HOLERITES_LIDOS.length ? `
+      <div style="background:#eef4fb;border:1px solid #9db8d8;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:0.84rem">
+        <b style="color:#1a3a5c">Renda variável?</b>
+        <label style="display:flex;align-items:center;gap:7px;margin-top:6px;font-weight:400;text-transform:none;letter-spacing:0">
+          <input type="radio" name="cfh_modo" value="substituir" checked style="width:16px;height:16px"> Substituir os valores (usar só este holerite)
+        </label>
+        <label style="display:flex;align-items:center;gap:7px;margin-top:4px;font-weight:400;text-transform:none;letter-spacing:0">
+          <input type="radio" name="cfh_modo" value="media" style="width:16px;height:16px"> Somar à <b>média</b> — este será o ${HOLERITES_LIDOS.length + 1}º holerite (ideal p/ comissões e adicionais variáveis)
+        </label>
+      </div>` : '';
     const corpo = `
+      ${blocoModo}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         ${_campoConfer('cfh_nome', 'Nome do interessado', _inText('cfh_nome', d.nome))}
         ${_campoConfer('cfh_bruta', 'Renda bruta', _inMoney('cfh_bruta', d.renda_bruta))}
@@ -2035,32 +2048,60 @@
     abrirConferIA('🧾 Conferir holerite lido pela IA', corpo, () => {
       const g = id => document.getElementById(id);
       if (g('cfh_nome').value.trim()) document.getElementById('nome').value = g('cfh_nome').value.trim();
-      const setM = (src, dst) => {
-        if (g(src).value !== '') document.getElementById(dst).value = fmtCentsPlain(parseMoney(g(src).value));
-      };
-      setM('cfh_bruta', 'rendaBruta');
-      setM('cfh_inss', 'descINSS');
-      setM('cfh_pensao', 'descPensao');
-      setM('cfh_outros', 'descOutros');
-      setM('cfh_consig', 'descConsignado');
-      // Situação do IR escolhida na conferência (nunca cai no "auto" sem querer)
       const sitIR = g('cfh_sitIR') ? g('cfh_sitIR').value : 'manual';
-      document.getElementById('situacaoIR').value = sitIR;
-      alternarIR();
-      if (sitIR === 'manual') {
-        document.getElementById('descIRRF').value =
-          g('cfh_irrf').value !== '' ? fmtCentsPlain(parseMoney(g('cfh_irrf').value)) : '';
-      }
-      let n = 0;
-      (d.consignados || []).forEach((c, i) => {
-        const ok = g('cfc_ok_' + i);
-        if (ok && ok.checked) {
-          adicionarDivida(g('cfc_cred_' + i).value || 'Consignado', 'consignado', 0, parseMoney(g('cfc_par_' + i).value), true);
-          n++;
+      const modoEl = document.querySelector('input[name="cfh_modo"]:checked');
+      const modo = modoEl ? modoEl.value : 'substituir';
+      const v = {
+        bruta: parseMoney(g('cfh_bruta').value), inss: parseMoney(g('cfh_inss').value),
+        pensao: parseMoney(g('cfh_pensao').value), outros: parseMoney(g('cfh_outros').value),
+        consig: parseMoney(g('cfh_consig').value),
+        irrf: sitIR === 'manual' ? parseMoney(g('cfh_irrf').value) : 0,
+      };
+      const setV = (dst, cents) => {
+        document.getElementById(dst).value = cents > 0 ? fmtCentsPlain(cents) : '';
+      };
+      let statusExtra = '';
+      if (modo === 'media') {
+        HOLERITES_LIDOS.push(v);
+        const n = HOLERITES_LIDOS.length;
+        const med = k => Math.round(HOLERITES_LIDOS.reduce((s, h) => s + (h[k] || 0), 0) / n);
+        setV('rendaBruta', med('bruta'));
+        setV('descINSS', med('inss'));
+        setV('descPensao', med('pensao'));
+        setV('descOutros', med('outros'));
+        setV('descConsignado', med('consig'));
+        document.getElementById('situacaoIR').value = sitIR;
+        alternarIR();
+        if (sitIR === 'manual') setV('descIRRF', med('irrf'));
+        statusExtra = ` Campos preenchidos com a MÉDIA de ${n} holerites (renda variável). Consignados não foram re-adicionados — confira a lista de dívidas.`;
+      } else {
+        HOLERITES_LIDOS = [v];
+        const setM = (src2, dst) => {
+          if (g(src2).value !== '') document.getElementById(dst).value = fmtCentsPlain(parseMoney(g(src2).value));
+        };
+        setM('cfh_bruta', 'rendaBruta');
+        setM('cfh_inss', 'descINSS');
+        setM('cfh_pensao', 'descPensao');
+        setM('cfh_outros', 'descOutros');
+        setM('cfh_consig', 'descConsignado');
+        document.getElementById('situacaoIR').value = sitIR;
+        alternarIR();
+        if (sitIR === 'manual') {
+          document.getElementById('descIRRF').value =
+            g('cfh_irrf').value !== '' ? fmtCentsPlain(parseMoney(g('cfh_irrf').value)) : '';
         }
-      });
+        let n = 0;
+        (d.consignados || []).forEach((c, i) => {
+          const ok = g('cfc_ok_' + i);
+          if (ok && ok.checked) {
+            adicionarDivida(g('cfc_cred_' + i).value || 'Consignado', 'consignado', 0, parseMoney(g('cfc_par_' + i).value), true);
+            n++;
+          }
+        });
+        if (n) statusExtra = ` ${n} consignado(s) adicionado(s) às dívidas.`;
+      }
       atualizarCascata();
-      iaStatus('iaHoleriteStatus', 'ok', `Dados aplicados ao formulário.${n ? ' ' + n + ' consignado(s) adicionado(s) às dívidas.' : ''} Revise e clique em Calcular.`);
+      iaStatus('iaHoleriteStatus', 'ok', `Dados aplicados ao formulário.${statusExtra} Revise e clique em Calcular.`);
     });
   }
 
@@ -2536,8 +2577,10 @@
     if (r.pensao) linhasDesc.push(`<tr class="menos"><td>(−) Pensão alimentícia em folha</td><td>− ${fmtCents(r.pensao)}</td></tr>`);
     if (r.outros) linhasDesc.push(`<tr class="menos"><td>(−) Outros descontos obrigatórios</td><td>− ${fmtCents(r.outros)}</td></tr>`);
 
+    const refMedia = HOLERITES_LIDOS.length > 1
+      ? ` <span class="ref">média de ${HOLERITES_LIDOS.length} holerites (renda variável)</span>` : '';
     demo.innerHTML = `
-      <tr><td>Renda Bruta Mensal</td><td>${fmtCents(r.rendaBruta)}</td></tr>
+      <tr><td>Renda Bruta Mensal${refMedia}</td><td>${fmtCents(r.rendaBruta)}</td></tr>
       ${linhasDesc.join('')}
       <tr class="subtotal"><td>= Renda Líquida <span class="ref">base do comprometimento e da margem consignável</span></td><td>${fmtCents(r.rendaLiquida)}</td></tr>
       <tr class="menos"><td>(−) Empréstimos consignados em folha <span class="ref">${pct(r.consignadoPct)} da renda líquida · margem legal: 35% + 5% = ${fmtCents(r.margemTotal)}</span></td><td>− ${fmtCents(r.consignado)}</td></tr>
@@ -2897,6 +2940,11 @@
       situacaoProfissional: document.getElementById('situacaoProfissional').value
     };
     preencherTimbre();
+
+    // Minuta revisional disponível quando os consignados excedem a margem legal
+    const btnRev = document.getElementById('btnRevisional');
+    if (btnRev) btnRev.style.display =
+      (r.rendaLiquida > 0 && r.consignado > r.margemConsignavel) ? 'inline-flex' : 'none';
 
     document.getElementById('resultado').style.display = 'block';
     document.getElementById('resultado').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -3418,6 +3466,95 @@ ${advLinha || '[Advogado(a) — OAB]'}`;
     document.getElementById('peticaoSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function gerarPeticaoRevisional() {
+    if (!ultimoCalculo) { alert('Calcule primeiro para gerar a minuta.'); return; }
+    const c = ultimoCalculo;
+    const r = c.r;
+    const cfg = getEscritorio();
+    const hoje = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+    const advLinha = [cfg.advogado, cfg.oab].filter(Boolean).join(', ');
+
+    const consigs = dividas.filter(d => d.emFolha);
+    const reus = consigs.map(d => (d.credor || 'Instituição financeira').toUpperCase())
+      .filter((v, i, a) => a.indexOf(v) === i);
+    const listaOps = consigs.map((d, i) =>
+      `   ${i + 1}. ${d.credor || 'Credor'} — ${getTipo(d.tipo).label} — parcela mensal descontada em folha: ${fmtCents(d.parcelaCents || 0)}${d.saldoCents ? ' — saldo devedor: ' + fmtCents(d.saldoCents) : ''};`
+    ).join('\n') || '   (relacionar as operações consignadas)';
+
+    const excesso35 = Math.max(r.consignado - r.margemConsignavel, 0);
+    const excesso40 = Math.max(r.consignado - r.margemTotal, 0);
+
+    const texto = `EXCELENTÍSSIMO(A) SENHOR(A) DOUTOR(A) JUIZ(A) DE DIREITO DA ___ VARA CÍVEL DA COMARCA DE _______________
+
+${c.nome.toUpperCase()}, [nacionalidade], [estado civil], [profissão], portador(a) do CPF nº _______________, residente e domiciliado(a) em _______________, por seu(sua) advogado(a) que esta subscreve${advLinha ? ' (' + advLinha + ')' : ''}, vem, respeitosamente, à presença de Vossa Excelência propor a presente
+
+AÇÃO REVISIONAL C/C OBRIGAÇÃO DE FAZER, COM PEDIDO DE TUTELA DE URGÊNCIA — LIMITAÇÃO DOS DESCONTOS CONSIGNADOS AO TETO LEGAL
+
+em face de ${reus.join('; ') || '[INSTITUIÇÕES FINANCEIRAS]'}, pessoa(s) jurídica(s) de direito privado, pelos fatos e fundamentos a seguir.
+
+I — DOS FATOS
+
+A parte autora percebe renda líquida mensal de ${fmtCents(r.rendaLiquida)} (renda bruta de ${fmtCents(r.rendaBruta)}, deduzidos os descontos obrigatórios). Sobre essa remuneração incidem descontos de empréstimos consignados em folha que somam ${fmtCents(r.consignado)} mensais — o equivalente a ${pct(r.consignadoPct)} da renda líquida.
+
+As operações consignadas são as seguintes:
+
+${listaOps}
+
+Ocorre que a margem legal para consignações é de 35% (trinta e cinco por cento) da remuneração disponível para empréstimos, acrescida de 5% (cinco por cento) exclusivamente para cartão de crédito consignado/saque, nos termos da Lei nº 10.820/2003, com a redação dada pela Lei nº 14.431/2022. No caso concreto:
+
+   • Margem legal de 35% (empréstimos): ${fmtCents(r.margemConsignavel)}
+   • Margem total com cartão consignado (35% + 5%): ${fmtCents(r.margemTotal)}
+   • Descontos efetivamente praticados: ${fmtCents(r.consignado)}
+   • EXCESSO sobre a margem de 35%: ${fmtCents(excesso35)}${excesso40 > 0 ? '\n   • EXCESSO mesmo sobre a margem total de 40%: ' + fmtCents(excesso40) : ''}
+
+O comprometimento excessivo da folha priva a parte autora dos recursos indispensáveis à sua subsistência${c.isSuperEndividado ? ', configurando, inclusive, situação de superendividamento (art. 54-A, §1º, do CDC)' : ''}.
+
+II — DO DIREITO
+
+a) Do teto legal das consignações. A Lei nº 10.820/2003 (art. 1º, §1º), com a redação da Lei nº 14.431/2022, limita a soma dos descontos consignados a 35% da remuneração disponível, acrescidos de 5% destinados exclusivamente ao cartão consignado. [Adequar o fundamento ao regime do(a) autor(a): servidores públicos federais — art. 45, §2º, da Lei 8.112/1990; servidores estaduais/municipais — norma local; militares — legislação própria; aposentados e pensionistas do INSS — art. 6º, §5º, da Lei 10.820/2003.]
+
+b) Da aplicação do CDC. As instituições financeiras submetem-se ao Código de Defesa do Consumidor (Súmula 297 do STJ), impondo-se a revisão dos contratos que onerem excessivamente o consumidor (art. 6º, V, e art. 51, IV, do CDC).
+
+c) Da preservação do mínimo existencial. Os descontos que ultrapassam o teto legal comprometem a dignidade da pessoa humana e o mínimo existencial (art. 1º, III, da CF; art. 6º, XI e XII, do CDC, com a redação da Lei 14.181/2021).
+
+III — DA TUTELA DE URGÊNCIA (art. 300 do CPC)
+
+A probabilidade do direito decorre da prova documental (contracheques e extrato de margem) que demonstra descontos de ${pct(r.consignadoPct)} da renda líquida, acima do teto legal. O perigo de dano é evidente: a cada mês, a parte autora é privada de ${fmtCents(excesso35)} indispensáveis à sua subsistência.
+
+Requer-se, liminarmente, que os réus sejam compelidos a readequar os descontos consignados, limitando sua soma a 35% da remuneração disponível (acrescida de 5% apenas quanto ao cartão consignado, se houver), com redistribuição proporcional entre as operações, sob pena de multa diária.
+
+IV — DOS PEDIDOS
+
+Ante o exposto, requer:
+
+a) a concessão da TUTELA DE URGÊNCIA, para limitar imediatamente a soma dos descontos consignados ao teto legal de 35% da remuneração disponível (mais 5% exclusivo do cartão consignado, se aplicável), redistribuindo-se proporcionalmente as parcelas entre os réus, sob pena de multa;
+
+b) a citação dos réus para, querendo, contestarem a presente;
+
+c) ao final, a PROCEDÊNCIA dos pedidos para: (i) confirmar a tutela de urgência; (ii) revisar os contratos consignados, com readequação das parcelas ao teto legal mediante alongamento dos prazos, sem incidência de encargos moratórios decorrentes da readequação; (iii) condenar os réus à restituição dos valores descontados acima do teto legal, com correção monetária e juros;
+
+d) a condenação dos réus em custas e honorários advocatícios;
+
+e) a produção de todas as provas admitidas, especialmente documental;
+
+f) os benefícios da justiça gratuita, nos termos do art. 98 do CPC, ante a situação financeira demonstrada.
+
+Dá-se à causa o valor de ${fmtCents(Math.max(excesso35 * 12, 100))}.
+
+Nestes termos,
+pede deferimento.
+
+_______________, ${hoje}.
+
+
+_________________________________
+${advLinha || '[Advogado(a) — OAB]'}`;
+
+    document.getElementById('textoPeticao').value = texto;
+    document.getElementById('peticaoSection').style.display = 'block';
+    document.getElementById('peticaoSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   function copiarPeticao() {
     const ta = document.getElementById('textoPeticao');
     ta.select();
@@ -3444,6 +3581,7 @@ ${advLinha || '[Advogado(a) — OAB]'}`;
     document.getElementById('peticaoSection').style.display = 'none';
     ultimoCalculo = null;
     _setCasoAberto(null);
+    HOLERITES_LIDOS = [];
     recalcDespesas();
     aplicarAno();
     alternarIR();
