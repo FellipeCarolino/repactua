@@ -43,7 +43,9 @@ import anthropic
 # ============================================================
 # Configuração
 # ============================================================
-MODEL = "claude-opus-4-8"
+# Modelo da leitura de documentos. Sonnet tem ótima qualidade em extração
+# e custa ~5x menos que Opus. Para trocar sem deploy: variável MODEL_IA no Railway.
+MODEL = os.environ.get("MODEL_IA", "claude-sonnet-5")
 MAX_TOKENS = 4096
 MAX_PDF_PAGES = 12
 
@@ -600,6 +602,32 @@ def logo_repactua(tam=34):
             '<circle cx="40" cy="40" r="3.5" fill="#fff"/></svg>')
 
 
+# Limite de tentativas (anti força-bruta) — janela deslizante em memória
+_TENTATIVAS = {}
+
+def _limitado(chave, maximo=8, janela_s=900):
+    """True se a chave estourou o limite de tentativas na janela (15 min)."""
+    agora = datetime.utcnow().timestamp()
+    fila = [t for t in _TENTATIVAS.get(chave, []) if agora - t < janela_s]
+    if len(fila) >= maximo:
+        _TENTATIVAS[chave] = fila
+        return True
+    fila.append(agora)
+    _TENTATIVAS[chave] = fila
+    if len(_TENTATIVAS) > 5000:  # higiene de memória
+        _TENTATIVAS.clear()
+    return False
+
+
+def _ip_cliente():
+    xf = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return xf or (request.remote_addr or "?")
+
+
+MSG_MUITAS_TENTATIVAS = ('<div class="erro">Muitas tentativas. Por segurança, aguarde '
+                         'alguns minutos e tente novamente.</div>')
+
+
 def _pagina_auth(titulo, corpo):
     return Response(PAGINA_BASE.replace("{{TITULO}}", titulo).replace("{{CORPO}}", corpo), mimetype="text/html")
 
@@ -666,6 +694,10 @@ def pagina_login():
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
         senha = request.form.get("senha") or ""
+        if _limitado("login:" + _ip_cliente()) or _limitado("login:" + email):
+            corpo_bloq = f"""<h2>Entrar</h2><div class="sub">Acesse sua conta para usar a calculadora.</div>{MSG_MUITAS_TENTATIVAS}
+    <div class="link"><a href="/esqueci-senha">Esqueci minha senha</a></div>"""
+            return _pagina_auth("Entrar", corpo_bloq)
         user = User.query.filter_by(email=email).first()
         if user and user.conferir_senha(senha):
             login_user(user, remember=True)
@@ -688,6 +720,10 @@ def esqueci_senha():
     msg = ""
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
+        if _limitado("esqueci:" + _ip_cliente(), maximo=5):
+            corpo_bloq = f"""<h2>Recuperar senha</h2>{MSG_MUITAS_TENTATIVAS}
+    <div class="link"><a href="/login">← Voltar ao login</a></div>"""
+            return _pagina_auth("Recuperar senha", corpo_bloq)
         user = User.query.filter_by(email=email).first() if email else None
         if user and email_ativo():
             token = secrets.token_urlsafe(32)
@@ -1580,6 +1616,18 @@ def _bloco_cancelar(u, org):
             'cursor:pointer;text-decoration:underline">Cancelar assinatura</button></form>')
 
 
+def _bloco_downgrade(u, plano):
+    """Link discreto p/ voltar ao Individual (dono de plano Escritório)."""
+    if plano != "escritorio" or u.papel != "dono":
+        return ""
+    valor = ('%.2f' % PLANOS["individual"]["valor"]).replace('.', ',')
+    return ('<form method="post" action="/conta/downgrade" style="margin-top:6px;text-align:right" '
+            'onsubmit="return confirm(\'Voltar ao plano Individual (R$ ' + valor + '/mês)? '
+            'Você precisa ter apenas o seu acesso (sem membros) e o pool volta a 50 consultas/mês.\')">'
+            '<button type="submit" style="background:none;border:none;color:#5a6a7a;font-size:.76rem;'
+            'cursor:pointer;text-decoration:underline">Voltar ao plano Individual</button></form>')
+
+
 def _bloco_upgrade(u, plano):
     """CTA de upgrade para Escritório, mostrado ao dono de um plano Individual."""
     if plano != "individual" or u.papel != "dono":
@@ -1618,6 +1666,7 @@ def render_conta(msg_ok="", msg_erro=""):
       {'' if u.status_efetivo=='ativo' else '<div class="row" style="margin-top:10px"><a class="btn" href="/assinar" style="text-decoration:none">Assinar agora →</a></div>'}
       {_bloco_upgrade(u, plano)}
       {_bloco_cancelar(u, org)}
+      {_bloco_downgrade(u, plano)}
     </div>"""
 
     bloco_equipe = ""
@@ -1835,6 +1884,27 @@ def conta_cancelar():
                                f"continua até {org.acesso_ate.strftime('%d/%m/%Y')}.")
 
 
+@app.route("/conta/downgrade", methods=["POST"])
+@login_required
+def conta_downgrade():
+    """Escritório → Individual (só o dono, sem outros membros ativos)."""
+    org = current_user.org
+    if not org or current_user.papel != "dono":
+        return render_conta(msg_erro="Apenas o dono da conta pode mudar o plano.")
+    if org.plano != "escritorio":
+        return render_conta(msg_erro="Sua conta já está no plano Individual.")
+    if org.total_membros > 1:
+        return render_conta(msg_erro="Para voltar ao Individual, primeiro remova os demais membros "
+                                     "da equipe (o plano Individual tem 1 acesso).")
+    _trocar_plano_assinatura(org, "individual")
+    current_user.cota_mensal = 50
+    db.session.commit()
+    valor = ('%.2f' % valor_cobranca("individual")).replace('.', ',')
+    _log_admin_safe = None  # ação do cliente, não do admin
+    return render_conta(msg_ok=f"Plano alterado para Individual. A próxima cobrança será de R$ {valor}, "
+                               "com 50 consultas/mês.")
+
+
 @app.route("/conta/upgrade", methods=["POST"])
 @login_required
 def conta_upgrade():
@@ -1915,7 +1985,12 @@ def admin_login():
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
         senha = request.form.get("senha") or ""
-        u = User.query.filter_by(email=email).first()
+        if _limitado("admlogin:" + _ip_cliente(), maximo=6):
+            corpo_bloq = f"""<h2>Painel Administrativo</h2>
+    <div class="sub">Acesso restrito — gestão Repactua.</div>{MSG_MUITAS_TENTATIVAS}
+    <div class="link"><a href="/">← Ir para o site</a></div>"""
+            return _pagina_auth("Admin", corpo_bloq)
+        u = User.query.filter_by(email=email).first() if email else None
         if u and u.is_admin and u.conferir_senha(senha):
             session["admin_ok"] = True
             session["admin_email"] = email
