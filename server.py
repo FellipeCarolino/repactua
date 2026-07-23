@@ -266,6 +266,7 @@ class User(UserMixin, db.Model):
     cota_mensal = db.Column(db.Integer, default=50)    # créditos atribuídos a este usuário
     reset_token = db.Column(db.String(80))             # recuperação de senha
     reset_expira = db.Column(db.DateTime)
+    aviso_trial = db.Column(db.Boolean, default=False)  # e-mail de fim do teste já enviado
 
     def set_senha(self, senha):
         self.senha_hash = generate_password_hash(senha, method="pbkdf2:sha256")
@@ -360,6 +361,7 @@ def _migrar_schema():
         'ALTER TABLE "user" ADD COLUMN cota_mensal INTEGER',
         'ALTER TABLE "user" ADD COLUMN reset_token VARCHAR(80)',
         'ALTER TABLE "user" ADD COLUMN reset_expira TIMESTAMP',
+        'ALTER TABLE "user" ADD COLUMN aviso_trial BOOLEAN',
         'ALTER TABLE escritorio ADD COLUMN creditos_total INTEGER',
         'ALTER TABLE escritorio ADD COLUMN timbre TEXT',
         'ALTER TABLE escritorio ADD COLUMN asaas_subscription_id VARCHAR(120)',
@@ -548,7 +550,25 @@ def _checar_uso():
     if current_user.consultas_restantes() <= 0:
         msg = f"Você atingiu o limite de {current_user.limite_mensal} consultas neste mês."
         org = current_user.org
-        if current_user.papel == "dono" and org and org.plano == "individual":
+        if current_user.status_efetivo == "trial":
+            msg = ("Suas consultas de teste terminaram. Assine o Repactua para continuar "
+                   "usando a leitura por IA.")
+            if not current_user.aviso_trial:
+                current_user.aviso_trial = True
+                db.session.commit()
+                _enviar_email(
+                    "Suas consultas de teste terminaram — continue com o Repactua",
+                    f"Olá{', ' + current_user.nome if current_user.nome else ''}!\n\n"
+                    "Você usou todas as consultas gratuitas do período de teste do Repactua. "
+                    "Que bom que a ferramenta foi útil!\n\n"
+                    "Para continuar analisando casos com leitura por IA, escolha um plano:\n\n"
+                    "• Individual — R$ 129,90/mês (1 acesso, 50 consultas/mês)\n"
+                    "• Escritório — R$ 229,90/mês (até 5 acessos, 250 consultas/mês)\n\n"
+                    "Assine em: https://repactua.com.br/assinar\n"
+                    "A ativação é automática após o pagamento, com nota fiscal.\n\n"
+                    "Equipe Repactua · repactua.com.br",
+                    para=current_user.email)
+        elif current_user.papel == "dono" and org and org.plano == "individual":
             msg += " Faça upgrade para o plano Escritório em 'Minha conta' e tenha um pool de 250 consultas/mês."
         return False, msg
     return True, None
@@ -743,7 +763,9 @@ def pagina_signup():
         email = (request.form.get("email") or "").strip().lower()
         senha = request.form.get("senha") or ""
         escritorio = (request.form.get("escritorio") or "").strip()
-        if not email or len(senha) < 6:
+        if not request.form.get("aceite"):
+            msg = '<div class="erro">Para criar a conta é necessário aceitar os Termos de Uso e a Política de Privacidade.</div>'
+        elif not email or len(senha) < 6:
             msg = '<div class="erro">Informe um e-mail válido e senha de no mínimo 6 caracteres.</div>'
         elif User.query.filter_by(email=email).first():
             msg = '<div class="erro">Já existe uma conta com este e-mail.</div>'
@@ -763,6 +785,19 @@ def pagina_signup():
             _enviar_email("🆕 Repactua: novo cadastro",
                           f"Nova conta criada: {nome or email} <{email}>"
                           f"{' · escritório: ' + escritorio if escritorio else ''}")
+            _enviar_email(
+                "Bem-vindo(a) ao Repactua! 🎉",
+                f"Olá{', ' + nome if nome else ''}!\n\n"
+                "Sua conta no Repactua foi criada com sucesso. Primeiros passos:\n\n"
+                "1. Acesse https://repactua.com.br e clique em \"Nova análise\";\n"
+                "2. Envie o holerite do seu cliente — a IA lê e preenche os campos para você conferir;\n"
+                "3. Adicione as dívidas (ou envie os contratos) e clique em Calcular;\n"
+                "4. Ajuste a parcela do plano, gere o relatório em PDF e a minuta da petição.\n\n"
+                "Sua conta de teste inclui consultas de IA gratuitas para você avaliar. "
+                "Quando precisar de mais, é só assinar em https://repactua.com.br/assinar\n\n"
+                "Qualquer dúvida, responda este e-mail.\n\n"
+                "Equipe Repactua · repactua.com.br",
+                para=email)
             login_user(user, remember=True)
             return redirect(url_for("index"))
     corpo = f"""<h2>Criar conta</h2><div class="sub">Comece com algumas consultas de teste gratuitas.</div>{msg}
@@ -771,6 +806,10 @@ def pagina_signup():
       <label>Escritório (opcional)</label><input name="escritorio" placeholder="Nome do escritório">
       <label>E-mail</label><input type="email" name="email" required placeholder="voce@escritorio.adv.br">
       <label>Senha</label><input type="password" name="senha" required placeholder="mínimo 6 caracteres">
+      <label style="display:flex;align-items:flex-start;gap:8px;text-transform:none;letter-spacing:0;font-weight:400;font-size:.82rem;margin-top:14px;color:#2b3a4a">
+        <input type="checkbox" name="aceite" required style="width:17px;height:17px;margin-top:2px;flex:none">
+        <span>Li e aceito os <a href="/termos" target="_blank">Termos de Uso</a> e a <a href="/privacidade" target="_blank">Política de Privacidade</a>.</span>
+      </label>
       <button class="btn" type="submit">Criar conta</button>
     </form>
     <div class="link">Já tem conta? <a href="/login">Entrar</a></div>"""
@@ -781,6 +820,160 @@ def pagina_signup():
 def pagina_logout():
     logout_user()
     return redirect(url_for("pagina_login"))
+
+
+# ============================================================
+# Termos de Uso e Política de Privacidade (LGPD)
+# ============================================================
+PAGINA_DOC = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{{TITULO}} · Repactua</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+body{background:#f4f6f9;color:#1c2b3a;line-height:1.7}
+.topo{background:#1a3a5c;color:#fff;padding:14px 24px;display:flex;align-items:center;gap:12px}
+.topo b{font-size:1.05rem}.topo small{opacity:.75;display:block;font-size:.72rem}
+.topo a{margin-left:auto;color:#f0b429;text-decoration:none;font-size:.85rem;font-weight:600}
+.wrap{max-width:820px;margin:0 auto;padding:32px 22px 60px}
+h1{color:#1a3a5c;font-size:1.5rem;margin-bottom:4px}
+.vig{color:#5a6a7a;font-size:.85rem;margin-bottom:24px}
+h2{color:#1a3a5c;font-size:1.05rem;margin:26px 0 8px}
+p,li{font-size:.93rem;color:#2b3a4a;margin-bottom:8px}
+ul{padding-left:22px;margin-bottom:8px}
+.box{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:28px 30px}
+.destaque{background:#fffaf0;border:1px solid #f0d9a0;border-radius:8px;padding:12px 14px;font-size:.88rem;margin:12px 0}
+a{color:#2c5f8a}
+</style></head><body>
+<div class="topo">{{LOGO}}<div><b>Repactua</b><small>Análise de superendividamento · para advogados</small></div><a href="/">← Voltar</a></div>
+<div class="wrap"><div class="box">{{CORPO}}</div></div></body></html>"""
+
+
+@app.route("/termos")
+def pagina_termos():
+    corpo = """
+<h1>Termos de Uso</h1>
+<div class="vig">Vigência a partir de 23/07/2026 · Repactua — um produto Sorvezene Technology Ltda, CNPJ 67.028.638/0001-01 ("Sorvezene", "nós").</div>
+
+<h2>1. O que é o Repactua</h2>
+<p>O Repactua é um software de apoio jurídico-financeiro, acessado pela internet (SaaS), destinado a advogados e escritórios de advocacia, para análise de superendividamento nos termos da Lei nº 14.181/2021, incluindo leitura assistida de documentos por inteligência artificial, cálculos, simulações de plano de pagamento e geração de minutas.</p>
+
+<h2>2. Natureza da ferramenta — aviso importante</h2>
+<div class="destaque">⚖️ O Repactua é uma <b>ferramenta de apoio</b>. Os resultados, cálculos, extrações por IA e minutas gerados <b>não constituem parecer jurídico</b> e <b>não substituem a análise profissional do advogado responsável</b>, a quem cabe conferir todos os dados e conclusões antes de qualquer uso, especialmente em juízo. A leitura por inteligência artificial pode conter erros ou imprecisões.</div>
+
+<h2>3. Cadastro e conta</h2>
+<ul>
+<li>O uso exige cadastro com informações verdadeiras e atualizadas. A conta é pessoal; o titular é responsável pela guarda da senha e por todas as atividades realizadas na conta.</li>
+<li>No plano Escritório, o titular ("dono") pode criar acessos para membros da sua equipe e responde pelo uso feito por eles.</li>
+<li>Podemos suspender ou encerrar contas em caso de violação destes Termos, fraude ou uso abusivo.</li>
+</ul>
+
+<h2>4. Planos, preços e pagamento</h2>
+<ul>
+<li><b>Teste gratuito:</b> novas contas recebem um número limitado de consultas de IA para avaliação, sem custo.</li>
+<li><b>Plano Individual:</b> R$ 129,90/mês — 1 acesso e 50 consultas de IA por mês.</li>
+<li><b>Plano Escritório:</b> R$ 229,90/mês — até 5 acessos e um total de 250 consultas de IA por mês, distribuíveis entre os membros.</li>
+<li>“Consulta de IA” é cada leitura de documento (holerite, contrato etc.) processada por inteligência artificial. As consultas renovam mensalmente e não se acumulam.</li>
+<li>A cobrança é recorrente mensal, processada pela plataforma Asaas (Pix, boleto ou cartão). Os preços podem ser reajustados com aviso prévio de pelo menos 30 dias.</li>
+<li>Emitimos nota fiscal de serviço para os pagamentos realizados.</li>
+</ul>
+
+<h2>5. Cancelamento</h2>
+<p>O assinante pode cancelar a qualquer momento pelo próprio painel ("Minha conta"). O cancelamento interrompe as cobranças futuras, e o acesso permanece ativo até o fim do período já pago. Não há reembolso proporcional do período em curso, salvo nos casos previstos em lei (incluindo o direito de arrependimento de 7 dias do art. 49 do CDC para a primeira contratação).</p>
+
+<h2>6. Uso permitido</h2>
+<ul>
+<li>É vedado usar o Repactua para fins ilícitos, revender o acesso, compartilhar credenciais fora da equipe contratada, tentar burlar limites de consultas, realizar engenharia reversa ou sobrecarregar a plataforma.</li>
+<li>O usuário declara ter autorização para inserir na plataforma os dados e documentos de terceiros (seus clientes), nos termos da legislação aplicável.</li>
+</ul>
+
+<h2>7. Propriedade intelectual</h2>
+<p>O software, a marca Repactua, o layout e os conteúdos da plataforma pertencem à Sorvezene. Os dados e documentos inseridos pelo usuário permanecem de titularidade do usuário/de seus clientes; os documentos gerados (relatórios e minutas) podem ser usados livremente pelo assinante na sua atividade profissional.</p>
+
+<h2>8. Disponibilidade e responsabilidade</h2>
+<ul>
+<li>Empregamos esforços razoáveis para manter o serviço disponível, mas não garantimos operação ininterrupta e livre de erros. Manutenções poderão ocorrer.</li>
+<li>Na extensão máxima permitida em lei, a responsabilidade total da Sorvezene limita-se ao valor pago pelo assinante nos 12 meses anteriores ao evento.</li>
+<li>A Sorvezene não responde pelo resultado de demandas judiciais ou extrajudiciais em que a ferramenta tenha sido utilizada, cabendo ao advogado a condução técnica do caso.</li>
+</ul>
+
+<h2>9. Privacidade</h2>
+<p>O tratamento de dados pessoais é regido pela nossa <a href="/privacidade">Política de Privacidade</a>, que integra estes Termos.</p>
+
+<h2>10. Alterações</h2>
+<p>Estes Termos podem ser atualizados. Mudanças relevantes serão comunicadas pela plataforma ou por e-mail; o uso continuado após a vigência vale como concordância.</p>
+
+<h2>11. Contato e foro</h2>
+<p>Dúvidas: <a href="mailto:fellipe@sorvezenetechnology.com.br">fellipe@sorvezenetechnology.com.br</a>. Fica eleito o foro da Comarca de Porto Alegre/RS, com renúncia a qualquer outro, ressalvadas as competências legais.</p>
+"""
+    return Response(PAGINA_DOC.replace("{{TITULO}}", "Termos de Uso")
+                    .replace("{{LOGO}}", logo_repactua(30)).replace("{{CORPO}}", corpo),
+                    mimetype="text/html")
+
+
+@app.route("/privacidade")
+def pagina_privacidade():
+    corpo = """
+<h1>Política de Privacidade</h1>
+<div class="vig">Vigência a partir de 23/07/2026 · Repactua — um produto Sorvezene Technology Ltda, CNPJ 67.028.638/0001-01. Elaborada em conformidade com a Lei nº 13.709/2018 (LGPD).</div>
+
+<h2>1. Papéis no tratamento de dados</h2>
+<ul>
+<li><b>Dados dos assinantes</b> (advogados e suas equipes): a Sorvezene atua como <b>controladora</b>.</li>
+<li><b>Dados dos clientes dos assinantes</b> (pessoas analisadas nos casos — holerites, contratos, dívidas): o <b>advogado/escritório é o controlador</b> desses dados, e a Sorvezene atua como <b>operadora</b>, tratando-os exclusivamente para prestar o serviço contratado, conforme instruções do assinante. Cabe ao assinante obter as autorizações necessárias de seus clientes.</li>
+</ul>
+
+<h2>2. Dados que coletamos</h2>
+<ul>
+<li><b>Cadastro:</b> nome, e-mail, senha (armazenada apenas como hash criptográfico irreversível), nome do escritório, OAB, telefone, cidade/UF.</li>
+<li><b>Pagamento:</b> CPF/CNPJ e endereço, compartilhados com a processadora Asaas para cobrança e emissão de nota fiscal. <b>Não armazenamos dados de cartão</b> — o pagamento ocorre no ambiente do Asaas.</li>
+<li><b>Casos e documentos:</b> os dados e arquivos (holerites, contratos) inseridos pelo assinante para análise, incluindo dados financeiros e, eventualmente, dados sensíveis (ex.: condição de saúde para fins de isenção de IR), tratados sob instrução do assinante.</li>
+<li><b>Uso da plataforma:</b> registros de acesso (logs), contagem de consultas de IA e dados técnicos necessários à segurança (art. 15 do Marco Civil da Internet).</li>
+</ul>
+
+<h2>3. Para que usamos</h2>
+<ul>
+<li>Prestar o serviço (cálculos, leitura por IA, relatórios, minutas, suporte);</li>
+<li>Gerir assinatura, cobrança e nota fiscal;</li>
+<li>Comunicações operacionais (recuperação de senha, avisos de conta e pagamento);</li>
+<li>Segurança, prevenção a fraudes e cumprimento de obrigações legais.</li>
+</ul>
+<p>Bases legais: execução de contrato, cumprimento de obrigação legal, legítimo interesse (segurança e melhoria do serviço) e, quando aplicável, consentimento.</p>
+
+<h2>4. Inteligência artificial</h2>
+<div class="destaque">🤖 Os documentos enviados para leitura são processados pela API da Anthropic (Claude) com a finalidade exclusiva de extrair os dados para a análise. Conforme a política da Anthropic para uso via API, os dados enviados <b>não são utilizados para treinar</b> os modelos de IA.</div>
+
+<h2>5. Com quem compartilhamos</h2>
+<ul>
+<li><b>Asaas</b> (Asaas Gestão Financeira S.A.) — processamento de pagamentos e nota fiscal;</li>
+<li><b>Anthropic</b> — processamento da leitura de documentos por IA;</li>
+<li><b>Railway</b> — hospedagem da aplicação e do banco de dados;</li>
+<li><b>Resend</b> — envio de e-mails transacionais;</li>
+<li>Autoridades, quando houver obrigação legal.</li>
+</ul>
+<p>Não vendemos dados pessoais. Alguns provedores podem estar localizados no exterior; nesses casos, a transferência internacional observa o art. 33 da LGPD.</p>
+
+<h2>6. Segurança e retenção</h2>
+<ul>
+<li>Senhas com hash irreversível; acesso via HTTPS; controle de acesso por conta e papel (dono/membro); registros de auditoria administrativos.</li>
+<li>Os dados são mantidos enquanto a conta existir. Após o encerramento, dados de casos são excluídos ou anonimizados em até 90 dias, ressalvadas as guardas legais (ex.: registros de acesso por 6 meses; documentos fiscais por 5 anos).</li>
+<li>O assinante pode excluir seus casos a qualquer momento pela própria plataforma.</li>
+</ul>
+
+<h2>7. Seus direitos (art. 18 da LGPD)</h2>
+<p>O titular pode solicitar confirmação de tratamento, acesso, correção, anonimização, portabilidade, eliminação, informação sobre compartilhamentos e revogação de consentimento. Pedidos relativos a dados de clientes de assinantes serão direcionados ao advogado controlador, salvo determinação legal em contrário.</p>
+
+<h2>8. Encarregado (DPO) e contato</h2>
+<p>Encarregado pelo tratamento de dados: Fellipe Carolino — <a href="mailto:fellipe@sorvezenetechnology.com.br">fellipe@sorvezenetechnology.com.br</a>.</p>
+
+<h2>9. Cookies</h2>
+<p>Utilizamos apenas cookies essenciais de sessão (autenticação). Não utilizamos cookies de publicidade.</p>
+
+<h2>10. Alterações</h2>
+<p>Esta Política pode ser atualizada; mudanças relevantes serão comunicadas pela plataforma ou por e-mail.</p>
+"""
+    return Response(PAGINA_DOC.replace("{{TITULO}}", "Política de Privacidade")
+                    .replace("{{LOGO}}", logo_repactua(30)).replace("{{CORPO}}", corpo),
+                    mimetype="text/html")
 
 
 # ============================================================
@@ -1605,6 +1798,15 @@ def conta_cancelar():
     _enviar_email("🚫 Repactua: assinatura cancelada",
                   f"O cliente {org.nome or current_user.email} cancelou a assinatura. "
                   f"Acesso válido até {org.acesso_ate.strftime('%d/%m/%Y')}.")
+    _enviar_email(
+        "Assinatura cancelada — Repactua",
+        f"Olá{', ' + current_user.nome if current_user.nome else ''}.\n\n"
+        "Confirmamos o cancelamento da sua assinatura do Repactua. Não haverá novas cobranças, "
+        f"e seu acesso continua ativo até {org.acesso_ate.strftime('%d/%m/%Y')}.\n\n"
+        "Seus casos salvos permanecem guardados — se mudar de ideia, é só assinar novamente "
+        "em https://repactua.com.br/assinar e tudo estará no lugar.\n\n"
+        "Obrigado por ter usado o Repactua!\nEquipe Repactua · repactua.com.br",
+        para=current_user.email)
     return render_conta(msg_ok=f"Assinatura cancelada. Não haverá novas cobranças, e seu acesso "
                                f"continua até {org.acesso_ate.strftime('%d/%m/%Y')}.")
 
@@ -1654,6 +1856,16 @@ def asaas_webhook():
                 "💰 Repactua: pagamento recebido",
                 f"Pagamento confirmado de {org.nome or email or cust_id} "
                 f"(R$ {pagamento.get('value', '?')}) — conta ativada/renovada.")
+            dono = next((u for u in (org.usuarios or []) if u.papel == "dono"), None)
+            if dono:
+                _enviar_email(
+                    "Pagamento confirmado — Repactua ✅",
+                    f"Olá{', ' + dono.nome if dono.nome else ''}!\n\n"
+                    f"Recebemos seu pagamento de R$ {pagamento.get('value', '')} e sua assinatura "
+                    f"do Repactua está ativa até {org.acesso_ate.strftime('%d/%m/%Y') if org.acesso_ate else '—'}.\n\n"
+                    "A nota fiscal será emitida automaticamente e enviada pelo nosso parceiro de pagamentos.\n\n"
+                    "Bom trabalho!\nEquipe Repactua · repactua.com.br",
+                    para=dono.email)
         elif tipo in ("PAYMENT_OVERDUE", "PAYMENT_DELETED", "PAYMENT_REFUNDED", "SUBSCRIPTION_DELETED"):
             org.status = "inativo"
             _enviar_email(
