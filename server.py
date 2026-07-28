@@ -2468,7 +2468,11 @@ def admin_org(oid):
     {aviso}
     <div class="cards">
       <div class="mc"><div class="lbl">Plano</div><div class="val" style="font-size:1.1rem">{plano_nome}</div>
-        <div class="det"><a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/escritorio?next={ret}">→ escritório</a> · <a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/individual?next={ret}">→ individual</a></div></div>
+        <div class="det">🎁 <b>cortesia vitalícia</b> (sem cobrança, nunca expira):
+        <a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/individual?next={ret}"
+           onclick="return confirm('Conceder acesso VITALÍCIO no plano Individual (cortesia, sem Asaas, nunca expira)?')">→ individual</a>
+        · <a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/escritorio?next={ret}"
+           onclick="return confirm('Conceder acesso VITALÍCIO no plano Escritório (cortesia, sem Asaas, nunca expira)?')">→ escritório</a></div></div>
       <div class="mc"><div class="lbl">Situação</div><div class="val" style="font-size:1.1rem"><span class="badge {cls}">{org.status}</span></div>
         <div class="det"><a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/ativo?next={ret}">ativar</a> · <a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/inativo?next={ret}">inativar</a> · <a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/trial?next={ret}">trial</a></div></div>
       <div class="mc"><div class="lbl">Acesso válido até</div><div class="val" style="font-size:1.1rem">{validade}</div>
@@ -2781,7 +2785,8 @@ def admin_plano(uid, plano):
         u.org.plano = plano
         u.org.max_membros = PLANOS[plano]["max_membros"]
         u.org.creditos_total = PLANOS[plano]["pool"]
-        u.org.status = "ativo"     # cortesia: ativa sem pagamento
+        u.org.status = "ativo"      # cortesia: ativa sem pagamento
+        u.org.acesso_ate = None     # sem expiração = acesso vitalício (cortesia)
         u.status = "ativo"
         # dono recebe o pool inteiro menos o que já está com outros membros
         if plano == "escritorio":
