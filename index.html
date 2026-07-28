@@ -68,6 +68,39 @@
     /* Acessibilidade: foco visível consistente */
     :focus-visible { outline: 2px solid var(--primary-light); outline-offset: 2px; }
 
+    /* Animações e micro-interações */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes revealUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes pulseSoft { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    .spinner {
+      display: inline-block; width: 15px; height: 15px; border-radius: 50%;
+      border: 2.5px solid rgba(26,58,92,0.22); border-top-color: var(--primary);
+      animation: spin 0.7s linear infinite; vertical-align: -3px; margin-right: 4px;
+    }
+    .reveal { animation: revealUp 0.45s cubic-bezier(.2,.7,.3,1) both; }
+    .is-loading { animation: pulseSoft 1.3s ease-in-out infinite; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; }
+      .reveal, .is-loading { animation: none; }
+      * { scroll-behavior: auto !important; }
+    }
+
+    /* Capricho mobile */
+    @media (max-width: 560px) {
+      main { padding: 20px 14px 48px; }
+      .card-header .btn { margin-left: 0; width: 100%; }
+      .actions { gap: 10px; }
+      .actions .btn { flex: 1 1 100%; }
+      .btn-lg { width: 100%; }
+      .resultado-hero { padding: 20px 18px; gap: 14px; }
+      .resultado-titulo { font-size: 1.25rem; }
+      .resultado-icon { font-size: 40px; }
+      .resultado-situacao-badge { margin-left: 0; }
+    }
+
     header {
       background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-light) 100%);
       color: #fff;
@@ -588,7 +621,9 @@
       padding: 18px 16px;
       text-align: center;
       box-shadow: var(--shadow);
+      transition: transform 0.15s, box-shadow 0.15s;
     }
+    .metric-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 
     .metric-card .metric-label {
       font-size: 0.75rem;
@@ -2035,13 +2070,14 @@
     const el = document.getElementById(elId);
     if (!el) return;
     const cores = {
-      load:    ['#e8f0f8', '#1a3a5c', '⏳'],
+      load:    ['#e8f0f8', '#1a3a5c', '<span class="spinner"></span>'],
       ok:      ['#e8f5e9', '#1b5e20', '✅'],
       erro:    ['#fdecea', '#7a2218', '⚠️'],
     };
     const [bg, cor, icone] = cores[tipo] || cores.load;
+    const cls = tipo === 'load' ? ' is-loading' : ' reveal';
     el.innerHTML = msg
-      ? `<div style="background:${bg};color:${cor};border-radius:8px;padding:10px 14px;margin:8px 0;font-size:0.84rem;line-height:1.5">${icone} ${msg}</div>`
+      ? `<div class="ia-status${cls}" style="background:${bg};color:${cor};border-radius:8px;padding:10px 14px;margin:8px 0;font-size:0.84rem;line-height:1.5;display:flex;align-items:center;gap:8px">${icone}<span>${msg}</span></div>`
       : '';
   }
 
@@ -3074,8 +3110,10 @@
     if (btnRev) btnRev.style.display =
       (r.rendaLiquida > 0 && r.consignado > r.margemConsignavel) ? 'inline-flex' : 'none';
 
-    document.getElementById('resultado').style.display = 'block';
-    document.getElementById('resultado').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const _res = document.getElementById('resultado');
+    _res.style.display = 'block';
+    _res.classList.remove('reveal'); void _res.offsetWidth; _res.classList.add('reveal');  // re-dispara a animação a cada cálculo
+    _res.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   // ============================================================
