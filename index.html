@@ -5,42 +5,81 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Repactua · Análise de Superendividamento</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cline x1='18' y1='40' x2='34' y2='40' stroke='%23c8960c' stroke-width='5' stroke-linecap='round'/%3E%3Cpolyline points='27,32 35,40 27,48' fill='none' stroke='%23c8960c' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='62' y1='40' x2='46' y2='40' stroke='%23c8960c' stroke-width='5' stroke-linecap='round'/%3E%3Cpolyline points='53,32 45,40 53,48' fill='none' stroke='%23c8960c' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
+      /* Marca */
       --primary: #1a3a5c;
       --primary-light: #2c5f8a;
-      --accent: #c8960c;
-      --accent-light: #f0b429;
+      --primary-dark: #12293f;
+      --accent: #bf8f1e;            /* dourado um tom mais rico */
+      --accent-strong: #a8791a;
+      --accent-light: #e6b84d;
       --danger: #c0392b;
       --success: #1e7e34;
       --warning: #856404;
-      --bg: #f4f6f9;
+
+      /* Neutros */
+      --bg: #f5f7fa;
       --card: #ffffff;
-      --border: #d0d7e2;
-      --text: #1c2b3a;
-      --text-muted: #5a6a7a;
-      --radius: 10px;
-      --shadow: 0 2px 12px rgba(0,0,0,0.08);
+      --surface-2: #f7f9fc;        /* preenchimentos sutis (inputs, zebra) */
+      --border: #dbe2ec;           /* borda padrão, mais suave */
+      --border-strong: #c3cddb;    /* borda de ênfase */
+      --text: #17293b;
+      --text-muted: #61708196;     /* fallback abaixo */
+      --text-muted: #5d6b7b;
+      --text-subtle: #8593a3;
+
+      /* Raio */
+      --radius-sm: 8px;
+      --radius: 12px;
+      --radius-lg: 16px;
+
+      /* Sombras em camadas (mais suaves e profissionais) */
+      --shadow-sm: 0 1px 2px rgba(16,33,51,0.06), 0 1px 3px rgba(16,33,51,0.05);
+      --shadow: 0 2px 4px rgba(16,33,51,0.05), 0 6px 16px rgba(16,33,51,0.07);
+      --shadow-lg: 0 8px 24px rgba(16,33,51,0.10), 0 2px 6px rgba(16,33,51,0.06);
+      --ring: 0 0 0 3px rgba(44,95,138,0.18);
+
+      /* Escala de espaçamento (base 4px) */
+      --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+      --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
+
+      /* Escala tipográfica */
+      --fs-xs: 0.75rem; --fs-sm: 0.83rem; --fs-base: 0.94rem;
+      --fs-md: 1.05rem; --fs-lg: 1.25rem; --fs-xl: 1.5rem; --fs-2xl: 1.9rem;
     }
 
     body {
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
     }
 
+    /* Acessibilidade: foco visível consistente */
+    :focus-visible { outline: 2px solid var(--primary-light); outline-offset: 2px; }
+
     header {
-      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+      background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-light) 100%);
       color: #fff;
-      padding: 28px 40px;
+      padding: 22px 40px;
       display: flex;
       align-items: center;
-      gap: 20px;
-      box-shadow: 0 3px 16px rgba(0,0,0,0.18);
+      gap: 18px;
+      flex-wrap: wrap;
+      row-gap: 12px;
+      box-shadow: var(--shadow-lg);
     }
+    @media (max-width: 640px) { header { padding: 18px 20px; } }
 
     .logo-icon {
       width: 56px;
@@ -130,12 +169,12 @@
 
     label {
       display: block;
-      font-size: 0.83rem;
-      font-weight: 600;
-      color: var(--text-muted);
+      font-size: var(--fs-xs);
+      font-weight: 700;
+      color: var(--text-subtle);
       margin-bottom: 6px;
       text-transform: uppercase;
-      letter-spacing: 0.4px;
+      letter-spacing: 0.7px;
     }
 
     label .tooltip {
@@ -175,17 +214,24 @@
 
     input[type="text"], input[type="number"], select {
       width: 100%;
-      padding: 10px 14px;
+      padding: 11px 14px;
       border: 1.5px solid var(--border);
-      border-radius: 7px;
-      font-size: 0.95rem;
-      background: #fafbfd;
+      border-radius: var(--radius-sm);
+      font-size: var(--fs-base);
+      font-family: inherit;
+      background: var(--surface-2);
       color: var(--text);
-      transition: border-color 0.2s;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
       outline: none;
     }
+    input::placeholder { color: var(--text-subtle); }
 
-    input:focus, select:focus { border-color: var(--primary-light); background: #fff; }
+    input:focus, select:focus {
+      border-color: var(--primary-light);
+      background: #fff;
+      box-shadow: var(--ring);
+    }
+    input:hover:not(:focus), select:hover:not(:focus) { border-color: var(--border-strong); }
 
     input.money { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -355,31 +401,36 @@
     .btn {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      padding: 10px 18px;
-      border-radius: 8px;
-      font-size: 0.9rem;
+      justify-content: center;
+      gap: 8px;
+      padding: 11px 20px;
+      border-radius: var(--radius-sm);
+      font-size: var(--fs-base);
       font-weight: 600;
+      font-family: inherit;
+      letter-spacing: 0.1px;
       cursor: pointer;
-      border: none;
-      transition: all 0.15s;
+      border: 1.5px solid transparent;
+      transition: background 0.15s, box-shadow 0.15s, transform 0.08s, border-color 0.15s;
+      -webkit-tap-highlight-color: transparent;
     }
+    .btn:active { transform: translateY(1px); }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
     .btn-outline {
-      background: transparent;
-      border: 1.5px solid var(--primary-light);
+      background: #fff;
+      border-color: var(--border-strong);
       color: var(--primary-light);
     }
+    .btn-outline:hover { background: #eef4fa; border-color: var(--primary-light); }
 
-    .btn-outline:hover { background: #e8f0f8; }
+    .btn-primary { background: var(--primary); color: #fff; box-shadow: var(--shadow-sm); }
+    .btn-primary:hover { background: var(--primary-light); box-shadow: var(--shadow); }
 
-    .btn-primary { background: var(--primary); color: #fff; }
-    .btn-primary:hover { background: var(--primary-light); }
+    .btn-accent { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); }
+    .btn-accent:hover { background: var(--accent-strong); box-shadow: var(--shadow); }
 
-    .btn-accent { background: var(--accent); color: #fff; }
-    .btn-accent:hover { background: var(--accent-light); }
-
-    .btn-lg { padding: 14px 32px; font-size: 1rem; }
+    .btn-lg { padding: 15px 34px; font-size: var(--fs-md); border-radius: var(--radius); }
 
     .actions {
       display: flex;
@@ -582,18 +633,21 @@
     .bar-fill.amarelo { background: linear-gradient(90deg, #ffc107, #ffda6a); }
     .bar-fill.vermelho{ background: linear-gradient(90deg, #dc3545, #ff6b7a); }
 
-    table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
+    table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
     th {
-      background: #f0f3f8;
-      padding: 10px 12px;
+      background: var(--surface-2);
+      padding: 11px 14px;
       text-align: left;
-      font-size: 0.75rem;
+      font-size: var(--fs-xs);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--text-muted);
+      letter-spacing: 0.6px;
+      color: var(--text-subtle);
       font-weight: 700;
+      border-bottom: 1px solid var(--border);
     }
-    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+    td { padding: 11px 14px; border-bottom: 1px solid #eef1f5; }
+    tbody tr { transition: background 0.12s; }
+    tbody tr:hover { background: #f9fbfd; }
     tr:last-child td { border-bottom: none; }
 
     .td-right { text-align: right; font-variant-numeric: tabular-nums; }
