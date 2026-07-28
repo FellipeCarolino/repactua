@@ -2787,6 +2787,13 @@ def admin_plano(uid, plano):
         u.org.creditos_total = PLANOS[plano]["pool"]
         u.org.status = "ativo"      # cortesia: ativa sem pagamento
         u.org.acesso_ate = None     # sem expiração = acesso vitalício (cortesia)
+        # cortesia = sem cobrança: cancela qualquer assinatura ativa no Asaas
+        if u.org.asaas_subscription_id:
+            try:
+                asaas("DELETE", "/subscriptions/%s" % u.org.asaas_subscription_id)
+            except Exception:
+                pass  # se já estava cancelada no Asaas, segue
+            u.org.asaas_subscription_id = None
         u.status = "ativo"
         # dono recebe o pool inteiro menos o que já está com outros membros
         if plano == "escritorio":
