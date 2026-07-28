@@ -1097,6 +1097,17 @@ def _sem_cache(resp):
     return resp
 
 
+@app.after_request
+def _html_sem_cache(resp):
+    """Qualquer página HTML (login, conta, admin…) sempre servida na versão mais nova,
+    para que atualizações de interface apareçam sem hard-refresh."""
+    if (resp.headers.get("Content-Type") or "").startswith("text/html"):
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+    return resp
+
+
 @app.route("/")
 def index():
     if not current_user.is_authenticated:
