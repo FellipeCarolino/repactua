@@ -642,11 +642,11 @@ def logo_repactua(tam=34):
     return (f'<svg width="{tam}" height="{tam}" viewBox="0 0 80 80" '
             'style="vertical-align:middle;flex:none" aria-hidden="true">'
             '<rect width="80" height="80" rx="18" fill="#1a3a5c"/>'
-            '<line x1="15" y1="40" x2="34" y2="40" stroke="#c8960c" stroke-width="6" stroke-linecap="round"/>'
-            '<polyline points="27,30 37,40 27,50" fill="none" stroke="#c8960c" '
+            '<line x1="15" y1="40" x2="34" y2="40" stroke="#bf8f1e" stroke-width="6" stroke-linecap="round"/>'
+            '<polyline points="27,30 37,40 27,50" fill="none" stroke="#bf8f1e" '
             'stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>'
-            '<line x1="65" y1="40" x2="46" y2="40" stroke="#c8960c" stroke-width="6" stroke-linecap="round"/>'
-            '<polyline points="53,30 43,40 53,50" fill="none" stroke="#c8960c" '
+            '<line x1="65" y1="40" x2="46" y2="40" stroke="#bf8f1e" stroke-width="6" stroke-linecap="round"/>'
+            '<polyline points="53,30 43,40 53,50" fill="none" stroke="#bf8f1e" '
             'stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>'
             '<circle cx="40" cy="40" r="3.5" fill="#fff"/></svg>')
 
@@ -685,7 +685,8 @@ PAGINA_BASE = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{{TITULO}} · Repactua</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
 <style>
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Segoe UI',system-ui,sans-serif}
 body{background:linear-gradient(135deg,#1a3a5c,#2c5f8a);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;color:#1c2b3a}
 .card{background:#fff;border-radius:14px;box-shadow:0 12px 48px rgba(0,0,0,.25);width:100%;max-width:420px;overflow:hidden}
 .top{background:#1a3a5c;color:#fff;padding:24px 28px;text-align:center}
@@ -698,18 +699,18 @@ body{background:linear-gradient(135deg,#1a3a5c,#2c5f8a);min-height:100vh;display
 label{display:block;font-size:.8rem;font-weight:600;color:#5a6a7a;margin:12px 0 5px;text-transform:uppercase;letter-spacing:.4px}
 input{width:100%;padding:11px 14px;border:1.5px solid #d0d7e2;border-radius:8px;font-size:.95rem;background:#fafbfd;outline:none}
 input:focus{border-color:#2c5f8a;background:#fff}
-.btn{width:100%;padding:13px;border:none;border-radius:8px;background:#c8960c;color:#fff;font-size:1rem;font-weight:700;cursor:pointer;margin-top:20px}
-.btn:hover{background:#f0b429}
+.btn{width:100%;padding:13px;border:none;border-radius:8px;background:#bf8f1e;color:#fff;font-size:1rem;font-weight:700;cursor:pointer;margin-top:20px}
+.btn:hover{background:#a8791a}
 .link{text-align:center;margin-top:16px;font-size:.88rem;color:#5a6a7a}
 .link a{color:#2c5f8a;font-weight:600;text-decoration:none}
 .erro{background:#fdecea;color:#7a2218;border:1px solid #e8a49a;border-radius:8px;padding:10px 14px;font-size:.85rem;margin-bottom:14px}
 .ok{background:#e9f7ee;color:#1b5e20;border:1px solid #7ec891;border-radius:8px;padding:10px 14px;font-size:.85rem;margin-bottom:14px}
 .planos{display:flex;gap:10px;margin-top:6px}
 .plano{flex:1;border:1.5px solid #d0d7e2;border-radius:10px;padding:12px;cursor:pointer;background:#fafbfd;text-transform:none;letter-spacing:0;margin:0;display:block}
-.plano.sel{border-color:#c8960c;background:#fffaf0;box-shadow:0 0 0 2px rgba(200,150,12,.15)}
+.plano.sel{border-color:#bf8f1e;background:#fffaf0;box-shadow:0 0 0 2px rgba(200,150,12,.15)}
 .plano input{display:none}
 .plano b{display:block;color:#1a3a5c;font-size:.95rem}
-.plano span{display:block;color:#c8960c;font-weight:700;font-size:1rem;margin:2px 0}
+.plano span{display:block;color:#bf8f1e;font-weight:700;font-size:1rem;margin:2px 0}
 .plano small{display:block;color:#5a6a7a;font-size:.72rem;line-height:1.3}
 </style></head><body><div class="card">
 <div class="top">
@@ -922,11 +923,12 @@ PAGINA_DOC = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{{TITULO}} · Repactua</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
 <style>
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Segoe UI',system-ui,sans-serif}
 body{background:#f4f6f9;color:#1c2b3a;line-height:1.7}
 .topo{background:#1a3a5c;color:#fff;padding:14px 24px;display:flex;align-items:center;gap:12px}
 .topo b{font-size:1.05rem}.topo small{opacity:.75;display:block;font-size:.72rem}
-.topo a{margin-left:auto;color:#f0b429;text-decoration:none;font-size:.85rem;font-weight:600}
+.topo a{margin-left:auto;color:#e6b84d;text-decoration:none;font-size:.85rem;font-weight:600}
 .wrap{max-width:820px;margin:0 auto;padding:32px 22px 60px}
 h1{color:#1a3a5c;font-size:1.5rem;margin-bottom:4px}
 .vig{color:#5a6a7a;font-size:.85rem;margin-bottom:24px}
@@ -1602,7 +1604,8 @@ PAGINA_CONTA = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Minha Conta · Repactua</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
 <style>
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Segoe UI',system-ui,sans-serif}
 body{background:#f4f6f9;min-height:100vh;color:#1c2b3a;padding:24px}
 .wrap{max-width:760px;margin:0 auto}
 .topo{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
@@ -1614,15 +1617,15 @@ body{background:#f4f6f9;min-height:100vh;color:#1c2b3a;padding:24px}
 .badge{padding:3px 12px;border-radius:20px;font-size:.78rem;font-weight:700}
 .b-ativo{background:#e9f7ee;color:#1b5e20}.b-trial{background:#fff4e0;color:#9a6700}.b-inativo{background:#fdecea;color:#7a2218}
 .bar{height:12px;background:#eef1f5;border-radius:8px;overflow:hidden;margin-top:6px}
-.bar > i{display:block;height:100%;background:#c8960c;border-radius:8px}
+.bar > i{display:block;height:100%;background:#bf8f1e;border-radius:8px}
 .muted{color:#5a6a7a;font-size:.82rem}
 table{width:100%;border-collapse:collapse;margin-top:8px}
 th{text-align:left;font-size:.72rem;text-transform:uppercase;color:#5a6a7a;padding:8px;border-bottom:1px solid #eef1f5}
 td{padding:8px;border-bottom:1px solid #f3f5f8;font-size:.88rem;vertical-align:middle}
 input,button{font-family:inherit}
 input[type=text],input[type=email],input[type=password],input[type=number]{padding:9px 11px;border:1.5px solid #d0d7e2;border-radius:7px;font-size:.9rem;background:#fafbfd;width:100%}
-.btn{padding:9px 16px;border:none;border-radius:7px;background:#c8960c;color:#fff;font-weight:700;cursor:pointer;font-size:.88rem}
-.btn:hover{background:#f0b429}
+.btn{padding:9px 16px;border:none;border-radius:7px;background:#bf8f1e;color:#fff;font-weight:700;cursor:pointer;font-size:.88rem}
+.btn:hover{background:#a8791a}
 .btn-sm{padding:5px 10px;font-size:.78rem;border-radius:6px;border:none;cursor:pointer}
 .btn-rem{background:#fdecea;color:#a3271a}.btn-cota{background:#eef4fb;color:#2c5f8a}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -1631,8 +1634,8 @@ input[type=text],input[type=email],input[type=password],input[type=number]{paddi
 .erro{background:#fdecea;color:#7a2218;border:1px solid #e8a49a;border-radius:8px;padding:10px 14px;font-size:.85rem;margin-bottom:14px}
 .pool{background:#fffaf0;border:1px solid #f0d9a0;border-radius:8px;padding:12px;margin-bottom:12px;font-size:.9rem}
 .upgrade-box{background:#fffaf0;border:1px solid #f0d9a0;border-radius:10px;padding:14px;margin-top:14px;font-size:.9rem}
-.upgrade-box .btn{background:#c8960c;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:.9rem}
-.upgrade-box .btn:hover{background:#f0b429}
+.upgrade-box .btn{background:#bf8f1e;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;font-size:.9rem}
+.upgrade-box .btn:hover{background:#a8791a}
 </style></head><body><div class="wrap">{{CORPO}}</div></body></html>"""
 
 
@@ -1640,29 +1643,30 @@ PAGINA_HOME = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Início · Repactua</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
 <style>
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Segoe UI',system-ui,sans-serif}
 body{background:#eef1f6;color:#1c2b3a;padding:24px}
 .wrap{max-width:1160px;margin:0 auto}
 .topo{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:10px}
 .marca{display:flex;align-items:center;gap:11px;font-weight:700;font-size:1.18rem;color:#1a3a5c}
 .marca small{display:block;font-weight:400;color:#5a6a7a;font-size:.8rem}
 .links a{color:#2c5f8a;text-decoration:none;font-size:.88rem;font-weight:600}
-.links a:hover{color:#c8960c}
+.links a:hover{color:#bf8f1e}
 .hero{background:#1a3a5c;color:#fff;border-radius:14px;padding:22px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px}
 .hero h1{font-size:1.4rem;font-weight:700}
 .hero-sub{color:rgba(255,255,255,.75);font-size:.86rem;margin-top:3px}
-.btn-novo{background:#c8960c;color:#fff;text-decoration:none;font-weight:700;padding:11px 20px;border-radius:9px;font-size:.95rem;white-space:nowrap}
-.btn-novo:hover{background:#f0b429}
+.btn-novo{background:#bf8f1e;color:#fff;text-decoration:none;font-weight:700;padding:11px 20px;border-radius:9px;font-size:.95rem;white-space:nowrap}
+.btn-novo:hover{background:#a8791a}
 .alerta{display:block;background:#fff4e0;color:#8a5a00;border:1px solid #f0d293;border-radius:10px;padding:12px 16px;margin-bottom:16px;text-decoration:none;font-size:.9rem;font-weight:600}
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:14px}
 .metric{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:16px 18px;text-decoration:none;color:#1c2b3a;border:1.5px solid transparent}
-.metric:hover{border-color:#c8960c}
+.metric:hover{border-color:#bf8f1e}
 .m-label{font-size:.74rem;text-transform:uppercase;letter-spacing:.4px;color:#7a8794;font-weight:600}
 .m-valor{font-size:1.7rem;font-weight:700;color:#1a3a5c;margin:4px 0 1px}
 .m-sub{font-size:.78rem;color:#8a97a5}
 .bar-wrap{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:14px 18px;margin-bottom:16px}
 .bar{height:11px;background:#eef1f5;border-radius:8px;overflow:hidden}
-.bar>i{display:block;height:100%;background:#c8960c;border-radius:8px}
+.bar>i{display:block;height:100%;background:#bf8f1e;border-radius:8px}
 .bar-leg{display:block;margin-top:8px;font-size:.8rem;color:#5a6a7a}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .card{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:20px}
@@ -1671,7 +1675,7 @@ body{background:#eef1f6;color:#1c2b3a;padding:24px}
 .card-h h2{margin-bottom:0}
 .atalhos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .atalho{background:#f7f9fc;border-radius:10px;padding:14px;text-decoration:none;color:#1c2b3a;border:1.5px solid transparent}
-.atalho:hover{border-color:#c8960c}
+.atalho:hover{border-color:#bf8f1e}
 .atalho.destaque{background:#1a3a5c;color:#fff;grid-column:1/-1}
 .a-ico{font-size:1.6rem;line-height:1}
 .a-nome{font-weight:700;margin-top:7px}
@@ -1679,11 +1683,11 @@ body{background:#eef1f6;color:#1c2b3a;padding:24px}
 .a-sub{font-size:.76rem;color:#5a6a7a;margin-top:2px}
 .recente{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #f0f3f7;text-decoration:none;color:#1c2b3a}
 .recente:last-of-type{border-bottom:none}
-.recente:hover .r-nome{color:#c8960c}
+.recente:hover .r-nome{color:#bf8f1e}
 .r-nome{font-weight:600;font-size:.88rem}
 .r-data{color:#8a97a5;font-size:.78rem;white-space:nowrap;margin-left:10px}
 .vertodos{color:#2c5f8a;text-decoration:none;font-weight:600;font-size:.82rem}
-.vertodos:hover{color:#c8960c}
+.vertodos:hover{color:#bf8f1e}
 .vazio{color:#5a6a7a;font-size:.88rem}.vazio a{color:#2c5f8a}
 @media(max-width:640px){.grid2{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">{{CORPO}}</div></body></html>"""
@@ -2108,7 +2112,8 @@ ADMIN_SHELL = """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{{TITULO}} · Repactua Admin</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cpolyline points='26,22 38,40 26,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolyline points='54,22 42,40 54,58' fill='none' stroke='%23c8960c' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E">
 <style>
-*{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Segoe UI',system-ui,sans-serif}
 body{background:#eef1f6;color:#1c2b3a;display:flex;min-height:100vh}
 aside{width:225px;background:#13283e;color:#fff;position:fixed;top:0;bottom:0;left:0;display:flex;flex-direction:column}
 .s-logo{display:flex;align-items:center;gap:10px;padding:18px;border-bottom:1px solid rgba(255,255,255,.08);font-weight:700}
@@ -2116,9 +2121,9 @@ aside{width:225px;background:#13283e;color:#fff;position:fixed;top:0;bottom:0;le
 nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:4px}
 .item{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.85);text-decoration:none;padding:10px 12px;border-radius:8px;font-size:.9rem;font-weight:600}
 .item:hover{background:rgba(255,255,255,.08)}
-.item.ativo{background:#c8960c;color:#13283e}
+.item.ativo{background:#bf8f1e;color:#13283e}
 .s-user{padding:14px 18px;border-top:1px solid rgba(255,255,255,.08);font-size:.74rem;opacity:.9;word-break:break-all}
-.s-user a{color:#f0b429;text-decoration:none;font-weight:700}
+.s-user a{color:#e6b84d;text-decoration:none;font-weight:700}
 main{flex:1;margin-left:225px;padding:26px 30px;max-width:calc(100% - 225px)}
 h1{color:#1a3a5c;font-size:1.35rem;margin-bottom:2px}
 h2{color:#1a3a5c;font-size:1rem;margin:20px 0 10px}
@@ -2129,7 +2134,7 @@ h2{color:#1a3a5c;font-size:1rem;margin:20px 0 10px}
 .mc .val{font-size:1.5rem;font-weight:700;color:#1a3a5c}
 .mc .det{font-size:.72rem;color:#8a97a5;margin-top:3px}
 .mc.verde{border-left:4px solid #1e7e34}.mc.verde .val{color:#1e7e34}
-.mc.ouro{border-left:4px solid #c8960c}.mc.ouro .val{color:#9a6700}
+.mc.ouro{border-left:4px solid #bf8f1e}.mc.ouro .val{color:#9a6700}
 .mc.rubi .val{color:#a3271a}
 .painel{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.06);padding:16px}
 .duas{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
@@ -2139,7 +2144,7 @@ table{width:100%;border-collapse:collapse;background:#fff;box-shadow:0 2px 12px 
 th{background:#1a3a5c;color:#fff;padding:10px 11px;text-align:left;font-size:.72rem;text-transform:uppercase;letter-spacing:.4px}
 td{padding:10px 11px;border-bottom:1px solid #eef1f5;font-size:.87rem;vertical-align:top}
 tr:hover td{background:#fafbfd}
-td a{color:#1a3a5c;text-decoration:none;font-size:.8rem;font-weight:600} td a:hover{color:#c8960c}
+td a{color:#1a3a5c;text-decoration:none;font-size:.8rem;font-weight:600} td a:hover{color:#bf8f1e}
 small{color:#8a97a5;font-weight:400}
 .badge{padding:3px 11px;border-radius:20px;font-size:.74rem;font-weight:700;white-space:nowrap}
 .b-ativo{background:#e9f7ee;color:#1b5e20}.b-trial{background:#fff4e0;color:#9a6700}.b-inativo{background:#fdecea;color:#7a2218}
@@ -2314,11 +2319,11 @@ def admin():
     <script>
     new Chart(document.getElementById('grafReceita'), { type: 'bar',
       data: { labels: %s, datasets: [{ data: %s, backgroundColor: '#1a3a5c',
-        hoverBackgroundColor: '#c8960c', borderRadius: 6 }] },
+        hoverBackgroundColor: '#bf8f1e', borderRadius: 6 }] },
       options: { plugins: { legend: { display: false } },
         scales: { y: { beginAtZero: true, ticks: { callback: function(v){ return 'R$ ' + v; } } } } } });
     new Chart(document.getElementById('grafContas'), { type: 'line',
-      data: { labels: %s, datasets: [{ data: %s, borderColor: '#c8960c',
+      data: { labels: %s, datasets: [{ data: %s, borderColor: '#bf8f1e',
         backgroundColor: 'rgba(200,150,12,.15)', fill: true, tension: .35, pointRadius: 4,
         pointBackgroundColor: '#1a3a5c' }] },
       options: { plugins: { legend: { display: false } },
@@ -2346,7 +2351,7 @@ def admin_assinantes():
         else:
             extra = ""
         uso_mes = (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime('%Y-%m') else 0
-        selo_admin = ' <span style="background:#1a3a5c;color:#f0b429;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:700">ADMIN</span>' if u.is_admin else ''
+        selo_admin = ' <span style="background:#1a3a5c;color:#e6b84d;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:700">ADMIN</span>' if u.is_admin else ''
         protegido = (u.email == ADMIN_EMAIL) or (u.email == session.get("admin_email"))
         if u.is_admin:
             link_admin = '<span style="color:#aaa;font-size:.8rem">admin protegido</span>' if protegido else f'<a href="/admin/admin/{u.id}/0">remover admin</a>'
@@ -2857,14 +2862,15 @@ def admin_subconta():
     }
     html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Criar subconta · Repactua</title><style>
-    *{{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif}}
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    *{{box-sizing:border-box;margin:0;padding:0;font-family:'Inter','Segoe UI',system-ui,sans-serif}}
     body{{background:#f4f6f9;color:#1c2b3a}} .wrap{{max-width:620px;margin:0 auto;padding:24px}}
     h1{{color:#1a3a5c;font-size:1.3rem;margin-bottom:4px}} .sub{{color:#5a6a7a;font-size:.85rem;margin-bottom:16px}}
     .card{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:22px}}
     label{{display:block;font-size:.74rem;text-transform:uppercase;color:#5a6a7a;font-weight:600;margin:12px 0 4px}}
     input,select{{width:100%;padding:10px 12px;border:1.5px solid #d0d7e2;border-radius:8px;font-size:.92rem;background:#fafbfd}}
     .row{{display:flex;gap:10px}} .row>div{{flex:1}}
-    .btn{{margin-top:18px;background:#c8960c;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-weight:700;cursor:pointer;font-size:.95rem}}
+    .btn{{margin-top:18px;background:#bf8f1e;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-weight:700;cursor:pointer;font-size:.95rem}}
     .ok{{background:#e9f7ee;color:#1b5e20;border:1px solid #7ec891;border-radius:8px;padding:12px 14px;font-size:.88rem;margin-bottom:14px}}
     .erro{{background:#fdecea;color:#7a2218;border:1px solid #e8a49a;border-radius:8px;padding:12px 14px;font-size:.85rem;margin-bottom:14px}}
     table td{{padding:6px 8px;border-bottom:1px solid #eef1f5;font-size:.85rem}}
@@ -2966,7 +2972,7 @@ def admin_financeiro():
         cadastro = (o.criado_em or datetime.utcnow()).strftime("%d/%m/%Y")
         cls = {"ativo": "b-ativo", "trial": "b-trial", "inativo": "b-inativo"}.get(o.status, "b-trial")
         sit = {"ativo": "Em dia", "trial": "Em teste", "inativo": "Inativo"}.get(o.status, o.status)
-        tag_cortesia = '<br><small style="color:#c8960c">cortesia</small>' if (o.status == "ativo" and not pago) else ""
+        tag_cortesia = '<br><small style="color:#bf8f1e">cortesia</small>' if (o.status == "ativo" and not pago) else ""
         contato = o.telefone or "—"
         cidade = (o.cidade + ("/" + o.uf if o.uf else "")) if o.cidade else "—"
         linhas += f"""<tr>
@@ -3048,7 +3054,7 @@ def admin_financeiro():
     new Chart(document.getElementById('grafReceita'), {
       type: 'bar',
       data: { labels: %s, datasets: [{ label: 'Recebido (R$)', data: %s,
-        backgroundColor: '#1a3a5c', hoverBackgroundColor: '#c8960c', borderRadius: 6 }] },
+        backgroundColor: '#1a3a5c', hoverBackgroundColor: '#bf8f1e', borderRadius: 6 }] },
       options: { plugins: { legend: { display: false } },
         scales: { y: { beginAtZero: true, ticks: { callback: function(v){ return 'R$ ' + v; } } } } }
     });
@@ -3142,12 +3148,13 @@ def admin_config_webhook():
 
     html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Webhook · Repactua</title><style>
-    body{{font-family:'Segoe UI',sans-serif;background:#f4f6f9;color:#1c2b3a;padding:24px}}
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body{{font-family:'Inter','Segoe UI',sans-serif;background:#f4f6f9;color:#1c2b3a;padding:24px}}
     .wrap{{max-width:620px;margin:0 auto}} h1{{color:#1a3a5c;font-size:1.3rem}}
     .card{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:22px;margin-top:14px}}
     .ok{{background:#e9f7ee;color:#1b5e20;border:1px solid #7ec891;border-radius:8px;padding:12px;margin-bottom:12px;font-size:.88rem}}
     .erro{{background:#fdecea;color:#7a2218;border:1px solid #e8a49a;border-radius:8px;padding:12px;margin-bottom:12px;font-size:.85rem}}
-    .btn{{background:#c8960c;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-weight:700;cursor:pointer;margin-top:8px}}
+    .btn{{background:#bf8f1e;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-weight:700;cursor:pointer;margin-top:8px}}
     a{{color:#2c5f8a;text-decoration:none}} table td{{padding:5px 8px;font-size:.9rem}} li{{font-size:.85rem;margin:3px 0}}</style></head>
     <body><div class="wrap"><a href="/admin">← Voltar ao painel</a>
     <h1 style="margin-top:8px">Configurar webhook da conta Asaas</h1>

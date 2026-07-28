@@ -6,15 +6,18 @@
 <title>Repactua · Análise de superendividamento com inteligência artificial</title>
 <meta name="description" content="O Repactua lê holerites e contratos com IA, calcula o superendividamento conforme a Lei 14.181/2021 e gera a petição de repactuação em minutos. Para advogados." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' rx='18' fill='%231a3a5c'/%3E%3Cline x1='18' y1='40' x2='34' y2='40' stroke='%23c8960c' stroke-width='5' stroke-linecap='round'/%3E%3Cpolyline points='27,32 35,40 27,48' fill='none' stroke='%23c8960c' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='62' y1='40' x2='46' y2='40' stroke='%23c8960c' stroke-width='5' stroke-linecap='round'/%3E%3Cpolyline points='53,32 45,40 53,48' fill='none' stroke='%23c8960c' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='40' cy='40' r='3.5' fill='%23c8960c'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  :root{--navy:#1a3a5c;--navy2:#13283e;--gold:#c8960c;--gold2:#f0b429;--ink:#1c2b3a;--muted:#5a6a7a;--bg:#f4f6f9;--line:#d0d7e2}
-  body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;color:var(--ink);background:#fff;line-height:1.6}
+  :root{--navy:#1a3a5c;--navy2:#13283e;--gold:#bf8f1e;--gold-dark:#a8791a;--gold2:#e6b84d;--ink:#17293b;--muted:#5d6b7b;--bg:#f5f7fa;--line:#dbe2ec}
+  body{font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;color:var(--ink);background:#fff;line-height:1.6;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
   a{text-decoration:none}
   .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
   .btn{display:inline-flex;align-items:center;gap:8px;border-radius:9px;font-weight:700;font-size:1rem;padding:13px 26px;cursor:pointer;transition:.15s;border:none}
-  .btn-gold{background:var(--gold);color:#fff}
-  .btn-gold:hover{background:var(--gold2)}
+  .btn-gold{background:var(--gold);color:#fff;box-shadow:0 2px 6px rgba(16,33,51,.12)}
+  .btn-gold:hover{background:var(--gold-dark)}
   .btn-ghost{background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.5)}
   .btn-ghost:hover{background:rgba(255,255,255,.12)}
   .btn-outline{background:transparent;color:var(--navy);border:1.5px solid var(--navy)}
