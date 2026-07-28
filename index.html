@@ -2145,6 +2145,11 @@
     `<input id="${id}" type="number" min="0" value="${v !== null && v !== undefined ? v : ''}" placeholder="—" style="width:100%">`;
 
   function conferirHolerite(d) {
+    // Checagem de sanidade: descontos somados não podem superar a renda bruta (indício de erro de leitura)
+    const _somaDesc = (d.inss || 0) + (d.irrf || 0) + (d.pensao || 0) + (d.outros_descontos || 0) + (d.consignados_total || 0);
+    const avisoSanidade = (d.renda_bruta && _somaDesc > d.renda_bruta + 0.5)
+      ? `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem;background:#fdecea;border-color:#e8a49a;color:#7a2218">⚠️ <b>Confira os valores:</b> os descontos somados (${fmtCents(reaisToCents(_somaDesc))}) ficaram <b>maiores que a renda bruta</b> (${fmtCents(reaisToCents(d.renda_bruta))}). Isso costuma indicar erro de leitura da IA — ajuste os campos antes de aplicar.</div>`
+      : '';
     const consigRows = (d.consignados || []).map((c, i) => `
       <tr>
         <td style="text-align:center"><input type="checkbox" id="cfc_ok_${i}" checked style="width:18px;height:18px"></td>
@@ -2190,6 +2195,7 @@
         ${_campoConfer('cfh_outros', 'Outros descontos obrigatórios', _inMoney('cfh_outros', d.outros_descontos))}
         ${_campoConfer('cfh_consig', 'Total consignados em folha', _inMoney('cfh_consig', d.consignados_total))}
       </div>
+      ${avisoSanidade}
       ${d.irrf ? '' : `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem;background:#fffbea;border-color:#e6c45a;color:#5a4000">⚠️ <b>Sem IRRF no holerite.</b> Se a pessoa é <b>isenta</b> (ex.: moléstia grave), selecione a opção de isenção acima — <u>não</u> use o cálculo automático, que descontaria um imposto que ela não paga e reduziria a renda líquida e a margem indevidamente. Os demais descontos obrigatórios (PSS, pensão militar, FUSEX, plano de saúde etc.) continuam contando em "Outros descontos".</div>`}
       ${blocoConsig}${obs}`;
     abrirConferIA('🧾 Conferir holerite lido pela IA', corpo, () => {

@@ -26,6 +26,7 @@ import urllib.error
 import csv
 import secrets
 import smtplib
+import time
 from email.mime.text import MIMEText
 from datetime import datetime, date, timedelta
 from functools import wraps
@@ -46,8 +47,10 @@ import anthropic
 # Modelo da leitura de documentos. Sonnet tem ótima qualidade em extração
 # e custa ~5x menos que Opus. Para trocar sem deploy: variável MODEL_IA no Railway.
 MODEL = os.environ.get("MODEL_IA", "claude-sonnet-5")
-MAX_TOKENS = 4096
+MAX_TOKENS = 8192       # teto generoso: Registratos com muitas dívidas não truncam (só paga o que gerar)
 MAX_PDF_PAGES = 12
+IA_TIMEOUT = 120.0      # segundos por chamada à IA
+IA_TENTATIVAS = 3       # re-tentativas em erros transitórios (sobrecarga/conexão)
 
 LIMITE_POR_STATUS = {"ativo": 50, "trial": 3, "inativo": 0}
 
@@ -589,17 +592,71 @@ def _content_block_for_upload(file_storage):
     return {"type": "image", "source": {"type": "base64", "media_type": media, "data": data}}
 
 
+def _chamar_ia(bloco, prompt, schema):
+    """Chama a IA com timeout e re-tentativa em erros transitórios (sobrecarga/conexão)."""
+    ultimo = None
+    for tentativa in range(IA_TENTATIVAS):
+        try:
+            return client.with_options(timeout=IA_TIMEOUT).messages.create(
+                model=MODEL, max_tokens=MAX_TOKENS,
+                messages=[{"role": "user", "content": [bloco, {"type": "text", "text": prompt}]}],
+                output_config={"format": {"type": "json_schema", "schema": schema}},
+            )
+        except anthropic.APIStatusError as e:
+            ultimo = e
+            transitorio = getattr(e, "status_code", 0) in (408, 409, 429, 500, 502, 503, 529)
+            if transitorio and tentativa < IA_TENTATIVAS - 1:
+                time.sleep(1.5 * (tentativa + 1))
+                continue
+            raise
+        except anthropic.APIConnectionError as e:  # inclui timeouts
+            ultimo = e
+            if tentativa < IA_TENTATIVAS - 1:
+                time.sleep(1.5 * (tentativa + 1))
+                continue
+            raise
+    if ultimo:
+        raise ultimo
+    raise RuntimeError("Não foi possível chamar a IA.")
+
+
 def _extrair(prompt, schema, file_storage):
     bloco = _content_block_for_upload(file_storage)
-    response = client.messages.create(
-        model=MODEL, max_tokens=MAX_TOKENS,
-        messages=[{"role": "user", "content": [bloco, {"type": "text", "text": prompt}]}],
-        output_config={"format": {"type": "json_schema", "schema": schema}},
-    )
+    response = _chamar_ia(bloco, prompt, schema)
     if response.stop_reason == "refusal":
-        raise RuntimeError("A análise foi recusada por política de segurança.")
-    texto = next((b.text for b in response.content if b.type == "text"), "")
-    return json.loads(texto)
+        raise RuntimeError("A leitura foi recusada pela política de segurança do provedor de IA. "
+                           "Confira se o arquivo é realmente o documento esperado.")
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError("O documento é muito extenso para uma leitura só. "
+                           "Envie menos páginas (ou separe o relatório em partes) e tente novamente.")
+    texto = next((b.text for b in response.content if getattr(b, "type", None) == "text"), "")
+    if not texto or not texto.strip():
+        raise RuntimeError("A IA não conseguiu ler dados deste arquivo. "
+                           "Verifique se está nítido e legível, e se é o documento correto.")
+    try:
+        return json.loads(texto)
+    except (ValueError, TypeError):
+        app.logger.warning("IA retornou JSON inválido (%d chars): %r", len(texto), texto[:400])
+        raise RuntimeError("A IA não conseguiu estruturar os dados deste documento. "
+                           "Tente novamente; se persistir, envie uma imagem mais nítida ou em outro formato.")
+
+
+def _mensagem_erro_ia(e):
+    """Traduz a exceção para uma mensagem amigável, sem vazar detalhes internos."""
+    if isinstance(e, (RuntimeError, ValueError)):
+        return str(e)  # mensagens que nós mesmos criamos (já amigáveis)
+    nome = type(e).__name__
+    if "RateLimit" in nome:
+        return "Há muitas leituras acontecendo ao mesmo tempo. Aguarde alguns segundos e tente novamente."
+    if "Timeout" in nome or "Connection" in nome:
+        return ("A leitura demorou mais que o esperado e a conexão foi encerrada. "
+                "Tente novamente — costuma funcionar na segunda tentativa.")
+    if "Overloaded" in nome or "InternalServer" in nome or "APIStatus" in nome or "APIError" in nome:
+        return "O serviço de IA está sobrecarregado no momento. Tente novamente em alguns instantes."
+    if "BadRequest" in nome:
+        return ("Não foi possível processar este arquivo. Confira se é um PDF ou imagem válido "
+                "(evite arquivos protegidos por senha) e tente outro formato.")
+    return "Não foi possível concluir a leitura agora. Tente novamente em instantes."
 
 
 def _checar_uso():
@@ -1350,52 +1407,38 @@ def timbre_salvar():
     return jsonify({"ok": True})
 
 
-@app.route("/api/extract-holerite", methods=["POST"])
-@login_required
-def extract_holerite():
+def _endpoint_extrair(prompt, schema, rotulo):
+    """Fluxo comum das leituras por IA: valida uso/arquivo, extrai, conta consulta só no sucesso."""
     ok, erro = _checar_uso()
     if not ok:
         return jsonify({"ok": False, "erro": erro, "limite": True}), 402
     if "file" not in request.files:
         return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
     try:
-        dados = _extrair(PROMPT_HOLERITE, SCHEMA_HOLERITE, request.files["file"])
-        current_user.registrar_consulta()
+        dados = _extrair(prompt, schema, request.files["file"])
+        current_user.registrar_consulta()  # só conta consulta quando a leitura dá certo
         return jsonify({"ok": True, "dados": dados, "restantes": current_user.consultas_restantes()})
     except Exception as e:  # noqa: BLE001
-        return jsonify({"ok": False, "erro": str(e)}), 500
+        app.logger.warning("Falha na leitura IA (%s): %s: %s", rotulo, type(e).__name__, e)
+        return jsonify({"ok": False, "erro": _mensagem_erro_ia(e)}), 500
+
+
+@app.route("/api/extract-holerite", methods=["POST"])
+@login_required
+def extract_holerite():
+    return _endpoint_extrair(PROMPT_HOLERITE, SCHEMA_HOLERITE, "holerite")
 
 
 @app.route("/api/extract-contrato", methods=["POST"])
 @login_required
 def extract_contrato():
-    ok, erro = _checar_uso()
-    if not ok:
-        return jsonify({"ok": False, "erro": erro, "limite": True}), 402
-    if "file" not in request.files:
-        return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
-    try:
-        dados = _extrair(PROMPT_CONTRATO, SCHEMA_CONTRATO, request.files["file"])
-        current_user.registrar_consulta()
-        return jsonify({"ok": True, "dados": dados, "restantes": current_user.consultas_restantes()})
-    except Exception as e:  # noqa: BLE001
-        return jsonify({"ok": False, "erro": str(e)}), 500
+    return _endpoint_extrair(PROMPT_CONTRATO, SCHEMA_CONTRATO, "contrato")
 
 
 @app.route("/api/extract-registrato", methods=["POST"])
 @login_required
 def extract_registrato():
-    ok, erro = _checar_uso()
-    if not ok:
-        return jsonify({"ok": False, "erro": erro, "limite": True}), 402
-    if "file" not in request.files:
-        return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
-    try:
-        dados = _extrair(PROMPT_REGISTRATO, SCHEMA_REGISTRATO, request.files["file"])
-        current_user.registrar_consulta()
-        return jsonify({"ok": True, "dados": dados, "restantes": current_user.consultas_restantes()})
-    except Exception as e:  # noqa: BLE001
-        return jsonify({"ok": False, "erro": str(e)}), 500
+    return _endpoint_extrair(PROMPT_REGISTRATO, SCHEMA_REGISTRATO, "registrato")
 
 
 @app.route("/api/health")
