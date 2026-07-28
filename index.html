@@ -71,15 +71,25 @@
     header {
       background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-light) 100%);
       color: #fff;
-      padding: 22px 40px;
+      padding: 18px 40px;
       display: flex;
       align-items: center;
-      gap: 18px;
+      justify-content: space-between;
+      gap: 18px 24px;
       flex-wrap: wrap;
-      row-gap: 12px;
       box-shadow: var(--shadow-lg);
+      position: sticky;
+      top: 0;
+      z-index: 50;
     }
-    @media (max-width: 640px) { header { padding: 18px 20px; } }
+    .brand { display: flex; align-items: center; gap: 16px; }
+    .brand-text h1 { line-height: 1.1; }
+    .topnav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .topnav-sep { width: 1px; height: 26px; background: rgba(255,255,255,0.2); margin: 0 2px; }
+    @media (max-width: 640px) {
+      header { padding: 16px 20px; }
+      .brand-text p { display: none; }
+    }
 
     .logo-icon {
       width: 56px;
@@ -97,15 +107,19 @@
     header p { font-size: 0.85rem; opacity: 0.78; margin-top: 3px; }
 
     .badge-lei {
-      margin-left: auto;
-      background: rgba(255,255,255,0.15);
-      border: 1px solid rgba(255,255,255,0.3);
-      border-radius: 20px;
-      padding: 6px 16px;
-      font-size: 0.78rem;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-size: var(--fs-xs);
       font-weight: 600;
+      letter-spacing: 0.2px;
       white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }
+    @media (max-width: 520px) { .badge-lei { display: none; } }
 
     main {
       max-width: 1100px;
@@ -126,6 +140,44 @@
 
     .info-banner strong { display: block; margin-bottom: 4px; font-size: 0.92rem; }
 
+    /* Divulgação progressiva: bloco jurídico recolhível */
+    .explainer {
+      background: linear-gradient(90deg, #eaf1f8 0%, #f2f6fb 100%);
+      border: 1px solid #d7e3f0;
+      border-left: 4px solid var(--primary-light);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin-bottom: 28px;
+      overflow: hidden;
+    }
+    .explainer > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: var(--fs-base);
+      color: var(--primary);
+      user-select: none;
+    }
+    .explainer > summary::-webkit-details-marker { display: none; }
+    .explainer > summary .chevron {
+      margin-left: auto;
+      transition: transform 0.2s;
+      font-size: 0.8rem;
+      opacity: 0.7;
+    }
+    .explainer[open] > summary .chevron { transform: rotate(180deg); }
+    .explainer > summary:hover { background: rgba(44,95,138,0.05); }
+    .explainer-body {
+      padding: 0 20px 16px 20px;
+      font-size: var(--fs-sm);
+      color: var(--primary);
+      line-height: 1.65;
+    }
+    .explainer-body b { color: var(--primary-dark); }
+
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -144,25 +196,28 @@
     }
 
     .card-header {
-      padding: 14px 20px;
+      padding: 16px 22px;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
+      flex-wrap: wrap;
     }
 
     .card-header .icon {
-      width: 32px; height: 32px;
-      border-radius: 8px;
+      width: 38px; height: 38px;
+      border-radius: 10px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 16px;
+      font-size: 18px;
       flex-shrink: 0;
+      box-shadow: inset 0 0 0 1px rgba(16,33,51,0.05);
     }
 
-    .card-header h2 { font-size: 0.97rem; font-weight: 700; }
-    .card-header p { font-size: 0.78rem; color: var(--text-muted); margin-top: 1px; }
+    .card-header h2 { font-size: var(--fs-md); font-weight: 700; letter-spacing: -0.2px; }
+    .card-header p { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px; }
+    .card-header .btn { margin-left: auto; }
 
-    .card-body { padding: 20px; }
+    .card-body { padding: 22px; }
 
     .form-group { margin-bottom: 16px; }
     .form-group:last-child { margin-bottom: 0; }
@@ -755,27 +810,24 @@
 
     .modal-body { padding: 22px; }
 
-    .header-acoes {
-      display: flex;
-      gap: 8px;
-      margin-left: 12px;
-      flex-shrink: 0;
-    }
-
     .btn-header {
-      background: rgba(255,255,255,0.12);
-      border: 1px solid rgba(255,255,255,0.3);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.24);
       color: #fff;
-      border-radius: 8px;
-      padding: 8px 14px;
-      font-size: 0.8rem;
+      border-radius: var(--radius-sm);
+      padding: 9px 15px;
+      font-size: var(--fs-sm);
       font-weight: 600;
+      font-family: inherit;
       cursor: pointer;
       white-space: nowrap;
-      transition: background 0.15s;
+      transition: background 0.15s, border-color 0.15s;
     }
 
-    .btn-header:hover { background: rgba(255,255,255,0.25); }
+    .btn-header:hover { background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.45); }
 
     .caso-item {
       display: flex;
@@ -904,24 +956,27 @@
 </div>
 
 <header>
-  <div class="logo-icon">
-    <svg width="34" height="34" viewBox="0 0 80 80" aria-hidden="true">
-      <line x1="14" y1="40" x2="33" y2="40" stroke="#e9b53a" stroke-width="6" stroke-linecap="round"/>
-      <polyline points="26,31 34,40 26,49" fill="none" stroke="#e9b53a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-      <line x1="66" y1="40" x2="47" y2="40" stroke="#e9b53a" stroke-width="6" stroke-linecap="round"/>
-      <polyline points="54,31 46,40 54,49" fill="none" stroke="#e9b53a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-      <circle cx="40" cy="40" r="3.5" fill="#e9b53a"/>
-    </svg>
+  <div class="brand">
+    <div class="logo-icon">
+      <svg width="34" height="34" viewBox="0 0 80 80" aria-hidden="true">
+        <line x1="14" y1="40" x2="33" y2="40" stroke="#e9b53a" stroke-width="6" stroke-linecap="round"/>
+        <polyline points="26,31 34,40 26,49" fill="none" stroke="#e9b53a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        <line x1="66" y1="40" x2="47" y2="40" stroke="#e9b53a" stroke-width="6" stroke-linecap="round"/>
+        <polyline points="54,31 46,40 54,49" fill="none" stroke="#e9b53a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="40" cy="40" r="3.5" fill="#e9b53a"/>
+      </svg>
+    </div>
+    <div class="brand-text">
+      <h1>Repactua</h1>
+      <p>Análise inteligente de superendividamento</p>
+    </div>
   </div>
-  <div>
-    <h1>Repactua</h1>
-    <p>Análise inteligente de superendividamento</p>
-  </div>
-  <div class="badge-lei">Lei nº 14.181/2021</div>
-  <div class="header-acoes">
-    <button class="btn-header" onclick="abrirModal('modalCasos'); listarCasos()">📁 Casos Salvos</button>
+  <nav class="topnav">
+    <span class="badge-lei">⚖️ Lei nº 14.181/2021</span>
+    <span class="topnav-sep"></span>
+    <button class="btn-header" onclick="abrirModal('modalCasos'); listarCasos()">📁 Casos salvos</button>
     <button class="btn-header" onclick="abrirModal('modalEscritorio')">⚙️ Escritório</button>
-  </div>
+  </nav>
 </header>
 
 <!-- Modal: Configuração do Escritório -->
@@ -982,10 +1037,12 @@
 </div>
 
 <main>
-  <div class="info-banner">
-    <strong>Como funciona esta calculadora</strong>
-    Informe a renda bruta e os descontos reais do holerite. A calculadora monta a cadeia correta: <b>renda bruta → descontos obrigatórios (INSS, IRRF, pensão) → renda líquida → descontos em folha (consignados) → renda efetivamente recebida</b>. Sobre essa base aplica o mínimo existencial e enquadra a situação na Lei nº 14.181/2021 (arts. 54-A e 104-A do CDC).
-  </div>
+  <details class="explainer">
+    <summary>ℹ️ Como funciona esta calculadora <span class="chevron">▼</span></summary>
+    <div class="explainer-body">
+      Informe a renda bruta e os descontos reais do holerite. A calculadora monta a cadeia correta: <b>renda bruta → descontos obrigatórios (INSS, IRRF, pensão) → renda líquida → descontos em folha (consignados) → renda efetivamente recebida</b>. Sobre essa base aplica o mínimo existencial e enquadra a situação na Lei nº 14.181/2021 (arts. 54-A e 104-A do CDC).
+    </div>
+  </details>
 
   <div class="form-section">
     <div class="grid-2">
