@@ -1014,6 +1014,34 @@
   </nav>
 </header>
 
+<!-- Modal: Boas-vindas (primeiro acesso) -->
+<div class="modal-overlay" id="modalBoasVindas">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>👋 Bem-vindo(a) ao Repactua</h2>
+      <button class="fechar" onclick="fecharModal('modalBoasVindas')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:0.92rem;color:var(--text);margin-bottom:16px">Em <b>3 passos</b> você tem a análise de superendividamento pronta para a audiência:</p>
+      <ol style="list-style:none;counter-reset:bv;display:flex;flex-direction:column;gap:12px;margin-bottom:20px">
+        <li style="counter-increment:bv;display:flex;gap:12px;align-items:flex-start">
+          <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:0.85rem;display:flex;align-items:center;justify-content:center">1</span>
+          <span style="font-size:0.9rem;line-height:1.5">Informe a <b>renda</b> — ou deixe a IA <b>ler o holerite</b> pra você.</span></li>
+        <li style="counter-increment:bv;display:flex;gap:12px;align-items:flex-start">
+          <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:0.85rem;display:flex;align-items:center;justify-content:center">2</span>
+          <span style="font-size:0.9rem;line-height:1.5">Liste as <b>dívidas</b> — ou <b>importe o Registrato</b> do Banco Central de uma vez.</span></li>
+        <li style="counter-increment:bv;display:flex;gap:12px;align-items:flex-start">
+          <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--primary);color:#fff;font-weight:800;font-size:0.85rem;display:flex;align-items:center;justify-content:center">3</span>
+          <span style="font-size:0.9rem;line-height:1.5">Clique em <b>Calcular</b> — sai o enquadramento legal, o plano de pagamento e a <b>minuta da petição</b>.</span></li>
+      </ol>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-accent" style="flex:1 1 220px" onclick="verCasoExemplo()">👀 Ver um caso de exemplo</button>
+        <button class="btn btn-outline" style="flex:1 1 140px" onclick="fecharModal('modalBoasVindas')">Começar do zero</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Configuração do Escritório -->
 <div class="modal-overlay" id="modalEscritorio">
   <div class="modal">
@@ -1461,7 +1489,7 @@
         <div class="debt-list" id="debtList"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-outline" onclick="adicionarDivida()">+ Adicionar Dívida</button>
-          <button class="btn btn-outline" onclick="adicionarDividasExemplo()">📥 Carregar Exemplo</button>
+          <button class="btn btn-outline" onclick="verCasoExemplo()">📥 Ver caso de exemplo</button>
         </div>
       </div>
     </div>
@@ -2574,6 +2602,35 @@
     document.getElementById('ctxViolencia').value = 'Não';
     document.getElementById('ctxBets').value = 'Não';
     atualizarCascata();
+  }
+
+  // Onboarding: carrega o caso de exemplo E já calcula/mostra o resultado (o "aha" na hora)
+  function verCasoExemplo() {
+    fecharModal('modalBoasVindas');
+    marcarBoasVindasVisto();
+    adicionarDividasExemplo();
+    calcular();
+  }
+
+  function marcarBoasVindasVisto() {
+    try { localStorage.setItem('repactua_bv_visto', '1'); } catch (e) { /* modo privado */ }
+  }
+
+  // Primeiro acesso: mostra as boas-vindas uma única vez por navegador
+  function _initBoasVindas() {
+    try {
+      if (!localStorage.getItem('repactua_bv_visto')) {
+        setTimeout(function () {
+          abrirModal('modalBoasVindas');
+          marcarBoasVindasVisto();  // marca ao exibir: não reaparece independentemente de como for fechado
+        }, 450);
+      }
+    } catch (e) { /* localStorage indisponível: não mostra */ }
+  }
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', _initBoasVindas);
+  } else {
+    _initBoasVindas();
   }
 
   // ============================================================
