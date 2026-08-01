@@ -24,6 +24,7 @@ import os
 import urllib.request
 import urllib.error
 import csv
+import re
 import secrets
 import smtplib
 import time
@@ -53,6 +54,7 @@ IA_TIMEOUT = 120.0      # segundos por chamada à IA
 IA_TENTATIVAS = 3       # re-tentativas em erros transitórios (sobrecarga/conexão)
 
 LIMITE_POR_STATUS = {"ativo": 50, "trial": 3, "inativo": 0}
+TRIAL_DIAS = 7  # duração do teste gratuito (dias corridos a partir do cadastro)
 
 # --- Pagamento (Asaas) ---
 ASAAS_API_KEY = os.environ.get("ASAAS_API_KEY", "")
@@ -227,10 +229,11 @@ class Escritorio(db.Model):
     max_membros = db.Column(db.Integer, default=1)
     creditos_total = db.Column(db.Integer, default=50)  # pool de consultas/mês do escritório
     timbre = db.Column(db.Text)  # JSON do timbre da petição (compartilhado pelo escritório)
+    documento = db.Column(db.String(20))  # CPF ou CNPJ (só dígitos) informado no cadastro
     telefone = db.Column(db.String(30))
     cidade = db.Column(db.String(120))
     uf = db.Column(db.String(4))
-    acesso_ate = db.Column(db.Date)  # validade do período pago (NULL = sem expiração/cortesia)
+    acesso_ate = db.Column(db.Date)  # validade do período pago/teste (NULL = sem expiração/cortesia)
     criado_em = db.Column(db.DateTime, default=datetime.utcnow)
 
     usuarios = db.relationship("User", backref="org", lazy=True,
@@ -284,8 +287,8 @@ class User(UserMixin, db.Model):
         """Status que vale para o usuário = status do escritório (fallback no legado)."""
         if self.org:
             st = self.org.status
-            # período pago expirou (ex.: assinatura cancelada) → perde o acesso
-            if st == "ativo" and self.org.acesso_ate and self.org.acesso_ate < date.today():
+            # período pago expirou (assinatura cancelada) ou o teste gratuito venceu → perde o acesso
+            if st in ("ativo", "trial") and self.org.acesso_ate and self.org.acesso_ate < date.today():
                 return "inativo"
             return st
         return self.status or "trial"
@@ -382,6 +385,7 @@ def _migrar_schema():
         'ALTER TABLE escritorio ADD COLUMN cidade VARCHAR(120)',
         'ALTER TABLE escritorio ADD COLUMN uf VARCHAR(4)',
         'ALTER TABLE escritorio ADD COLUMN acesso_ate DATE',
+        'ALTER TABLE escritorio ADD COLUMN documento VARCHAR(20)',
     ):
         try:
             db.session.execute(text(ddl))
@@ -904,6 +908,56 @@ def redefinir_senha():
     return _pagina_auth("Redefinir senha", corpo)
 
 
+def _so_digitos(s):
+    return re.sub(r"\D", "", s or "")
+
+
+def _cpf_valido(cpf):
+    cpf = _so_digitos(cpf)
+    if len(cpf) != 11 or cpf == cpf[0] * 11:
+        return False
+    for i in (9, 10):
+        soma = sum(int(cpf[n]) * ((i + 1) - n) for n in range(i))
+        dig = (soma * 10) % 11
+        dig = 0 if dig == 10 else dig
+        if dig != int(cpf[i]):
+            return False
+    return True
+
+
+def _cnpj_valido(cnpj):
+    cnpj = _so_digitos(cnpj)
+    if len(cnpj) != 14 or cnpj == cnpj[0] * 14:
+        return False
+    pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    pesos2 = [6] + pesos1
+    for pesos in (pesos1, pesos2):
+        i = len(pesos)
+        soma = sum(int(cnpj[n]) * pesos[n] for n in range(i))
+        resto = soma % 11
+        dig = 0 if resto < 2 else 11 - resto
+        if dig != int(cnpj[i]):
+            return False
+    return True
+
+
+def _documento_valido(doc):
+    """True se for um CPF (11 díg.) ou CNPJ (14 díg.) com dígitos verificadores válidos."""
+    d = _so_digitos(doc)
+    if len(d) == 11:
+        return _cpf_valido(d)
+    if len(d) == 14:
+        return _cnpj_valido(d)
+    return False
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _email_valido(email):
+    return bool(_EMAIL_RE.match((email or "").strip()))
+
+
 @app.route("/signup", methods=["GET", "POST"])
 def pagina_signup():
     if current_user.is_authenticated:
@@ -914,16 +968,24 @@ def pagina_signup():
         email = (request.form.get("email") or "").strip().lower()
         senha = request.form.get("senha") or ""
         escritorio = (request.form.get("escritorio") or "").strip()
+        documento = _so_digitos(request.form.get("documento"))
         if not request.form.get("aceite"):
             msg = '<div class="erro">Para criar a conta é necessário aceitar os Termos de Uso e a Política de Privacidade.</div>'
-        elif not email or len(senha) < 6:
-            msg = '<div class="erro">Informe um e-mail válido e senha de no mínimo 6 caracteres.</div>'
+        elif not _email_valido(email):
+            msg = '<div class="erro">Informe um e-mail válido.</div>'
+        elif len(senha) < 6:
+            msg = '<div class="erro">A senha deve ter no mínimo 6 caracteres.</div>'
+        elif not _documento_valido(documento):
+            msg = '<div class="erro">Informe um CPF ou CNPJ válido (apenas números ou com pontuação).</div>'
         elif User.query.filter_by(email=email).first():
             msg = '<div class="erro">Já existe uma conta com este e-mail.</div>'
         else:
             status_inicial = "ativo" if email == ADMIN_EMAIL else "trial"
             org = Escritorio(nome=(escritorio or nome or email), plano="individual",
-                             status=status_inicial, max_membros=1)
+                             status=status_inicial, max_membros=1, documento=documento)
+            # Teste gratuito com validade: expira em TRIAL_DIAS dias (admin não expira)
+            if status_inicial == "trial":
+                org.acesso_ate = date.today() + timedelta(days=TRIAL_DIAS)
             db.session.add(org)
             db.session.flush()
             user = User(email=email, nome=nome, escritorio=escritorio, status=status_inicial,
@@ -944,17 +1006,18 @@ def pagina_signup():
                 "2. Envie o holerite do seu cliente — a IA lê e preenche os campos para você conferir;\n"
                 "3. Adicione as dívidas (ou envie os contratos) e clique em Calcular;\n"
                 "4. Ajuste a parcela do plano, gere o relatório em PDF e a minuta da petição.\n\n"
-                "Sua conta de teste inclui consultas de IA gratuitas para você avaliar. "
-                "Quando precisar de mais, é só assinar em https://repactua.com.br/assinar\n\n"
+                "Sua conta de teste inclui consultas de IA gratuitas por 7 dias para você avaliar. "
+                "Quando precisar de mais (ou quando o teste terminar), é só assinar em https://repactua.com.br/assinar\n\n"
                 "Qualquer dúvida, responda este e-mail.\n\n"
                 "Equipe Repactua · repactua.com.br",
                 para=email)
             login_user(user, remember=True)
             return redirect(url_for("index"))
-    corpo = f"""<h2>Criar conta</h2><div class="sub">Comece com algumas consultas de teste gratuitas.</div>{msg}
+    corpo = f"""<h2>Criar conta</h2><div class="sub">Teste grátis por {TRIAL_DIAS} dias, com consultas de IA para avaliar.</div>{msg}
     <form method="post">
       <label>Nome</label><input name="nome" placeholder="Seu nome">
       <label>Escritório (opcional)</label><input name="escritorio" placeholder="Nome do escritório">
+      <label>CPF ou CNPJ</label><input name="documento" required inputmode="text" placeholder="000.000.000-00 ou 00.000.000/0000-00">
       <label>E-mail</label><input type="email" name="email" required placeholder="voce@escritorio.adv.br">
       <label>Senha</label><input type="password" name="senha" required placeholder="mínimo 6 caracteres">
       <label style="display:flex;align-items:flex-start;gap:8px;text-transform:none;letter-spacing:0;font-weight:400;font-size:.82rem;margin-top:14px;color:#2b3a4a">
@@ -1021,7 +1084,7 @@ def pagina_termos():
 
 <h2>4. Planos, preços e pagamento</h2>
 <ul>
-<li><b>Teste gratuito:</b> novas contas recebem um número limitado de consultas de IA para avaliação, sem custo.</li>
+<li><b>Teste gratuito:</b> novas contas recebem um número limitado de consultas de IA para avaliação, sem custo, por 7 (sete) dias a partir do cadastro. Encerrado o período de teste, o uso da IA depende da contratação de um plano.</li>
 <li><b>Plano Individual:</b> R$ 129,90/mês — 1 acesso e 50 consultas de IA por mês.</li>
 <li><b>Plano Escritório:</b> R$ 229,90/mês — até 5 acessos e um total de 250 consultas de IA por mês, distribuíveis entre os membros.</li>
 <li>“Consulta de IA” é cada leitura de documento (holerite, contrato etc.) processada por inteligência artificial. As consultas renovam mensalmente e não se acumulam.</li>
