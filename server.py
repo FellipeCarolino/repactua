@@ -960,6 +960,16 @@ def _cnpj_valido(cnpj):
     return True
 
 
+def _fmt_documento(doc):
+    """Formata CPF/CNPJ para exibição (com máscara e rótulo do tipo)."""
+    d = _so_digitos(doc)
+    if len(d) == 11:
+        return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]} (CPF)"
+    if len(d) == 14:
+        return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]} (CNPJ)"
+    return d or "—"
+
+
 def _documento_valido(doc):
     """True se for um CPF (11 díg.) ou CNPJ (14 díg.) com dígitos verificadores válidos."""
     d = _so_digitos(doc)
@@ -2625,6 +2635,32 @@ def admin_org(oid):
     n_casos = Caso.query.filter_by(org_id=org.id).count()
     mes = datetime.utcnow().strftime("%Y-%m")
 
+    # Dono (responsável) e dados cadastrais completos
+    dono = next((u for u in (org.usuarios or []) if (u.papel or "dono") == "dono"),
+                (org.usuarios[0] if org.usuarios else None))
+    def _lin_cad(rotulo, valor):
+        return (f'<tr><td style="color:#5a6a7a;width:190px;vertical-align:top">{rotulo}</td>'
+                f'<td style="font-weight:600">{valor or "—"}</td></tr>')
+    if dono:
+        conf = ('<span class="badge b-ativo">confirmado</span>' if dono.email_confirmado
+                else '<span class="badge b-inativo">e-mail pendente</span>')
+        dono_val = f"{dono.nome or '—'}<br><small style='color:#5a6a7a'>{dono.email}</small> {conf}"
+    else:
+        dono_val = "—"
+    criado_fmt = org.criado_em.strftime("%d/%m/%Y às %H:%M") if org.criado_em else "—"
+    local = " / ".join([p for p in [(org.cidade or "").strip(), (org.uf or "").strip()] if p]) or "—"
+    linhas_cad = "".join([
+        _lin_cad("Escritório / Razão", org.nome),
+        _lin_cad("CPF / CNPJ", _fmt_documento(org.documento)),
+        _lin_cad("Responsável (dono)", dono_val),
+        _lin_cad("OAB", dono.oab if dono else None),
+        _lin_cad("Telefone", org.telefone),
+        _lin_cad("Cidade / UF", local),
+        _lin_cad("Plano", plano_nome),
+        _lin_cad("Cadastro em", criado_fmt),
+        _lin_cad("ID Asaas (cliente)", org.asaas_customer_id),
+    ])
+
     linhas_m = ""
     for m in sorted(org.usuarios or [], key=lambda x: (x.papel != "dono", x.email)):
         uso = (m.usage_contagem or 0) if m.usage_mes == mes else 0
@@ -2690,6 +2726,8 @@ def admin_org(oid):
       <div class="mc"><div class="lbl">Pool de créditos</div><div class="val" style="font-size:1.1rem">{org.cota_distribuida}/{org.creditos_total}</div>
         <div class="det">{org.total_membros}/{org.max_membros} acessos · {n_casos} caso(s)</div></div>
     </div>
+    <h2>📋 Dados cadastrais</h2>
+    <table class="cad"><tbody>{linhas_cad}</tbody></table>
     <h2>👥 Membros</h2>
     <table><thead><tr><th>Membro</th><th>Papel</th><th>Cota/mês</th><th>Usou</th><th>Suporte</th></tr></thead>
     <tbody>{linhas_m}</tbody></table>
@@ -2697,7 +2735,8 @@ def admin_org(oid):
     <table><thead><tr><th>Data</th><th>Valor</th><th>Forma</th><th>Status</th></tr></thead>
     <tbody>{linhas_p}</tbody></table>
     <p class="nota">"Entrar como" abre o sistema logado como o cliente (sua sessão de admin continua valendo — volte pelo /admin). A senha temporária aparece uma única vez.</p>
-    <style>.btn-mini{{background:#eef4fb;color:#2c5f8a;border:none;border-radius:6px;padding:4px 9px;font-size:.74rem;font-weight:700;cursor:pointer;margin:2px 2px 2px 0}}.btn-mini:hover{{background:#1a3a5c;color:#fff}}</style>"""
+    <style>.btn-mini{{background:#eef4fb;color:#2c5f8a;border:none;border-radius:6px;padding:4px 9px;font-size:.74rem;font-weight:700;cursor:pointer;margin:2px 2px 2px 0}}.btn-mini:hover{{background:#1a3a5c;color:#fff}}
+    table.cad{{background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden}}table.cad td{{padding:9px 14px;border-bottom:1px solid #eef1f5;font-size:.9rem}}table.cad tr:last-child td{{border-bottom:none}}</style>"""
     return _admin_page(org.nome or "Conta", conteudo, "assin")
 
 
