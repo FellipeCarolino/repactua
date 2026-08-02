@@ -55,6 +55,14 @@ IA_TENTATIVAS = 3       # re-tentativas em erros transitórios (sobrecarga/conex
 
 LIMITE_POR_STATUS = {"ativo": 50, "trial": 3, "inativo": 0}
 TRIAL_DIAS = 7  # duração do teste gratuito (dias corridos a partir do cadastro)
+BASE_URL = os.environ.get("BASE_URL", "https://repactua.com.br").rstrip("/")
+# Domínios de e-mail descartável/temporário — bloqueados no cadastro (contas legítimas apenas)
+DOMINIOS_DESCARTAVEIS = {
+    "mailinator.com", "guerrillamail.com", "10minutemail.com", "tempmail.com",
+    "temp-mail.org", "throwawaymail.com", "yopmail.com", "getnada.com", "trashmail.com",
+    "fakeinbox.com", "sharklasers.com", "maildrop.cc", "dispostable.com", "mintemail.com",
+    "mohmal.com", "emailondeck.com", "moakt.com", "tempr.email", "spam4.me", "grr.la",
+}
 
 # --- Pagamento (Asaas) ---
 ASAAS_API_KEY = os.environ.get("ASAAS_API_KEY", "")
@@ -275,6 +283,8 @@ class User(UserMixin, db.Model):
     reset_token = db.Column(db.String(80))             # recuperação de senha
     reset_expira = db.Column(db.DateTime)
     aviso_trial = db.Column(db.Boolean, default=False)  # e-mail de fim do teste já enviado
+    email_confirmado = db.Column(db.Boolean, default=False)  # double opt-in: só entra após confirmar o e-mail
+    confirm_token = db.Column(db.String(80))            # token do link de confirmação de e-mail
 
     def set_senha(self, senha):
         self.senha_hash = generate_password_hash(senha, method="pbkdf2:sha256")
@@ -386,6 +396,10 @@ def _migrar_schema():
         'ALTER TABLE escritorio ADD COLUMN uf VARCHAR(4)',
         'ALTER TABLE escritorio ADD COLUMN acesso_ate DATE',
         'ALTER TABLE escritorio ADD COLUMN documento VARCHAR(20)',
+        'ALTER TABLE "user" ADD COLUMN email_confirmado BOOLEAN',
+        'ALTER TABLE "user" ADD COLUMN confirm_token VARCHAR(80)',
+        # contas que já existiam antes da confirmação por e-mail ficam confirmadas (não travar ninguém)
+        'UPDATE "user" SET email_confirmado = TRUE WHERE email_confirmado IS NULL',
     ):
         try:
             db.session.execute(text(ddl))
@@ -811,9 +825,14 @@ def pagina_login():
             return _pagina_auth("Entrar", corpo_bloq)
         user = User.query.filter_by(email=email).first()
         if user and user.conferir_senha(senha):
-            login_user(user, remember=True)
-            return redirect(url_for("index"))
-        erro = '<div class="erro">E-mail ou senha incorretos.</div>'
+            if not user.email_confirmado:
+                erro = ('<div class="erro">Confirme seu e-mail antes de entrar. '
+                        f'<a href="/reenviar-confirmacao?email={email}" style="color:inherit;font-weight:700">Reenviar confirmação</a>.</div>')
+            else:
+                login_user(user, remember=True)
+                return redirect(url_for("index"))
+        else:
+            erro = '<div class="erro">E-mail ou senha incorretos.</div>'
     corpo = f"""<h2>Entrar</h2><div class="sub">Acesse sua conta para usar a calculadora.</div>{erro}
     <form method="post">
       <label>E-mail</label><input type="email" name="email" required placeholder="voce@escritorio.adv.br">
@@ -958,6 +977,27 @@ def _email_valido(email):
     return bool(_EMAIL_RE.match((email or "").strip()))
 
 
+def _dominio_descartavel(email):
+    dominio = (email or "").strip().lower().rsplit("@", 1)[-1]
+    return dominio in DOMINIOS_DESCARTAVEIS
+
+
+def _enviar_confirmacao(user):
+    """Gera token e envia o link de confirmação de e-mail (double opt-in)."""
+    user.confirm_token = secrets.token_urlsafe(32)
+    db.session.commit()
+    link = f"{BASE_URL}/confirmar-email?token={user.confirm_token}"
+    _enviar_email(
+        "Confirme seu e-mail · Repactua",
+        f"Olá{', ' + user.nome if user.nome else ''}!\n\n"
+        "Para ativar sua conta no Repactua e começar o teste gratuito, confirme que este e-mail é seu "
+        "clicando no link abaixo:\n\n"
+        f"{link}\n\n"
+        "Se você não criou esta conta, ignore este e-mail.\n\n"
+        "Equipe Repactua · repactua.com.br",
+        para=user.email)
+
+
 @app.route("/signup", methods=["GET", "POST"])
 def pagina_signup():
     if current_user.is_authenticated:
@@ -973,14 +1013,21 @@ def pagina_signup():
             msg = '<div class="erro">Para criar a conta é necessário aceitar os Termos de Uso e a Política de Privacidade.</div>'
         elif not _email_valido(email):
             msg = '<div class="erro">Informe um e-mail válido.</div>'
+        elif _dominio_descartavel(email):
+            msg = '<div class="erro">Não aceitamos e-mails temporários/descartáveis. Use um e-mail permanente (preferencialmente o do escritório).</div>'
         elif len(senha) < 6:
             msg = '<div class="erro">A senha deve ter no mínimo 6 caracteres.</div>'
         elif not _documento_valido(documento):
             msg = '<div class="erro">Informe um CPF ou CNPJ válido (apenas números ou com pontuação).</div>'
         elif User.query.filter_by(email=email).first():
             msg = '<div class="erro">Já existe uma conta com este e-mail.</div>'
+        elif Escritorio.query.filter_by(documento=documento).first():
+            msg = '<div class="erro">Já existe uma conta com este CPF/CNPJ. Cada CPF/CNPJ pode ter apenas uma conta.</div>'
         else:
-            status_inicial = "ativo" if email == ADMIN_EMAIL else "trial"
+            eh_admin = (email == ADMIN_EMAIL)
+            # Confirmação por e-mail só quando há e-mail ativo; se estiver fora do ar, não trava o cadastro
+            auto_ok = eh_admin or not email_ativo()
+            status_inicial = "ativo" if eh_admin else "trial"
             org = Escritorio(nome=(escritorio or nome or email), plano="individual",
                              status=status_inicial, max_membros=1, documento=documento)
             # Teste gratuito com validade: expira em TRIAL_DIAS dias (admin não expira)
@@ -989,30 +1036,29 @@ def pagina_signup():
             db.session.add(org)
             db.session.flush()
             user = User(email=email, nome=nome, escritorio=escritorio, status=status_inicial,
-                        org_id=org.id, papel="dono")
+                        org_id=org.id, papel="dono", email_confirmado=auto_ok)
             user.set_senha(senha)
-            if email == ADMIN_EMAIL:
+            if eh_admin:
                 user.is_admin = True
             db.session.add(user)
             db.session.commit()
-            _enviar_email("🆕 Repactua: novo cadastro",
+            _enviar_email("🆕 Repactua: novo cadastro" + ("" if auto_ok else " (aguardando confirmação de e-mail)"),
                           f"Nova conta criada: {nome or email} <{email}>"
                           f"{' · escritório: ' + escritorio if escritorio else ''}")
-            _enviar_email(
-                "Bem-vindo(a) ao Repactua! 🎉",
-                f"Olá{', ' + nome if nome else ''}!\n\n"
-                "Sua conta no Repactua foi criada com sucesso. Primeiros passos:\n\n"
-                "1. Acesse https://repactua.com.br e clique em \"Nova análise\";\n"
-                "2. Envie o holerite do seu cliente — a IA lê e preenche os campos para você conferir;\n"
-                "3. Adicione as dívidas (ou envie os contratos) e clique em Calcular;\n"
-                "4. Ajuste a parcela do plano, gere o relatório em PDF e a minuta da petição.\n\n"
-                "Sua conta de teste inclui consultas de IA gratuitas por 7 dias para você avaliar. "
-                "Quando precisar de mais (ou quando o teste terminar), é só assinar em https://repactua.com.br/assinar\n\n"
-                "Qualquer dúvida, responda este e-mail.\n\n"
-                "Equipe Repactua · repactua.com.br",
-                para=email)
-            login_user(user, remember=True)
-            return redirect(url_for("index"))
+            if auto_ok:
+                login_user(user, remember=True)
+                return redirect(url_for("index"))
+            # Conta comum: só é ativada após confirmar o e-mail (double opt-in)
+            _enviar_confirmacao(user)
+            return _pagina_auth("Confirme seu e-mail", f"""
+            <h2>📧 Confirme seu e-mail</h2>
+            <div class="sub">Falta só um passo para ativar sua conta.</div>
+            <p style="font-size:.92rem;color:#2b3a4a;line-height:1.6;margin:14px 0">
+              Enviamos um link de confirmação para <b>{email}</b>. Abra sua caixa de entrada e clique no link para ativar
+              sua conta e começar o teste de {TRIAL_DIAS} dias.</p>
+            <p style="font-size:.85rem;color:#5a6a7a;margin-bottom:16px">Não chegou? Verifique o spam ou
+              <a href="/reenviar-confirmacao?email={email}">reenviar o e-mail de confirmação</a>.</p>
+            <div class="link"><a href="/login">Voltar para o login</a></div>""")
     corpo = f"""<h2>Criar conta</h2><div class="sub">Teste grátis por {TRIAL_DIAS} dias, com consultas de IA para avaliar.</div>{msg}
     <form method="post">
       <label>Nome</label><input name="nome" placeholder="Seu nome">
@@ -1028,6 +1074,39 @@ def pagina_signup():
     </form>
     <div class="link">Já tem conta? <a href="/login">Entrar</a></div>"""
     return _pagina_auth("Criar conta", corpo)
+
+
+@app.route("/confirmar-email")
+def confirmar_email():
+    token = (request.args.get("token") or "").strip()
+    user = User.query.filter_by(confirm_token=token).first() if token else None
+    if not user:
+        return _pagina_auth("Link inválido", """
+        <h2>Link inválido ou já usado</h2>
+        <div class="sub">Este link de confirmação não é mais válido.</div>
+        <p style="font-size:.9rem;color:#2b3a4a;margin:14px 0">Se você já confirmou, é só entrar. Caso contrário,
+          faça login para reenviarmos um novo link.</p>
+        <div class="link"><a href="/login">Ir para o login</a></div>""")
+    user.email_confirmado = True
+    user.confirm_token = None
+    db.session.commit()
+    login_user(user, remember=True)
+    return redirect(url_for("index"))
+
+
+@app.route("/reenviar-confirmacao", methods=["GET", "POST"])
+def reenviar_confirmacao():
+    email = (request.values.get("email") or "").strip().lower()
+    if email:
+        user = User.query.filter_by(email=email).first()
+        if user and not user.email_confirmado:
+            _enviar_confirmacao(user)
+    # resposta genérica (não revela se o e-mail existe)
+    return _pagina_auth("E-mail de confirmação", """
+    <h2>📧 Confirmação reenviada</h2>
+    <div class="sub">Se houver uma conta pendente com este e-mail, o link de confirmação foi reenviado.</div>
+    <p style="font-size:.85rem;color:#5a6a7a;margin:14px 0">Verifique a caixa de entrada e o spam.</p>
+    <div class="link"><a href="/login">Voltar para o login</a></div>""")
 
 
 @app.route("/logout")
@@ -1983,18 +2062,27 @@ def conta_membro_add():
         cota = 0
     if org.vagas_restantes <= 0:
         return render_conta(msg_erro="Limite de 5 acessos atingido.")
-    if not email or len(senha) < 6:
-        return render_conta(msg_erro="Informe e-mail válido e senha de no mínimo 6 caracteres.")
+    if not _email_valido(email):
+        return render_conta(msg_erro="Informe um e-mail válido para o membro.")
+    if _dominio_descartavel(email):
+        return render_conta(msg_erro="Não aceitamos e-mails temporários/descartáveis para membros.")
+    if len(senha) < 6:
+        return render_conta(msg_erro="A senha do membro deve ter no mínimo 6 caracteres.")
     if User.query.filter_by(email=email).first():
         return render_conta(msg_erro="Já existe uma conta com este e-mail.")
     if cota > org.cota_disponivel:
         return render_conta(msg_erro=f"Cota indisponível. Restam {org.cota_disponivel} créditos para distribuir.")
+    auto_ok = not email_ativo()  # se o e-mail estiver fora do ar, não trava o membro
     m = User(email=email, nome=nome, escritorio=org.nome, org_id=org.id,
-             papel="membro", cota_mensal=cota, status=org.status)
+             papel="membro", cota_mensal=cota, status=org.status, email_confirmado=auto_ok)
     m.set_senha(senha)
     db.session.add(m)
     db.session.commit()
-    return render_conta(msg_ok=f"Membro {email} criado com cota de {cota} consultas/mês.")
+    if auto_ok:
+        return render_conta(msg_ok=f"Membro {email} criado com cota de {cota} consultas/mês.")
+    _enviar_confirmacao(m)  # membro também confirma o e-mail antes do 1º acesso
+    return render_conta(msg_ok=f"Membro {email} criado com cota de {cota} consultas/mês. "
+                               "Ele receberá um e-mail para confirmar o acesso antes do primeiro login.")
 
 
 @app.route("/conta/membro/<int:mid>/cota", methods=["POST"])
