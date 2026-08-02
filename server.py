@@ -2553,7 +2553,14 @@ def admin_assinantes():
     """Gestão de assinantes: status, plano, admins e exclusão."""
     if not _admin_logado():
         return redirect(url_for("admin_login"))
-    users = User.query.order_by(User.criado_em.desc()).all()
+    # Ordena: trials primeiro (os que expiram antes no topo), depois as demais contas (cadastro mais recente)
+    def _chave_ordem(u):
+        org = u.org
+        if org and org.status == "trial" and org.acesso_ate:
+            return (0, org.acesso_ate.toordinal())
+        ts = u.criado_em.timestamp() if u.criado_em else 0
+        return (1, -ts)
+    users = sorted(User.query.all(), key=_chave_ordem)
     linhas = ""
     for u in users:
         org = u.org
@@ -2604,7 +2611,7 @@ def admin_assinantes():
           </td></tr>"""
     conteudo = f"""
     <h1>Assinantes</h1>
-    <div class="sub">{len(users)} login(s) cadastrado(s) · clique no nome para abrir a ficha completa</div>
+    <div class="sub">{len(users)} login(s) · ordenado pelos <b>trials que expiram primeiro</b> · clique no nome para abrir a ficha completa</div>
     <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
       <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, plano...">
       <a href="/admin/export/assinantes.csv" style="background:#1a3a5c;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-size:.82rem;font-weight:700">⬇ Exportar CSV</a>
