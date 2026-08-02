@@ -2649,6 +2649,20 @@ def admin_org(oid):
         dono_val = "—"
     criado_fmt = org.criado_em.strftime("%d/%m/%Y às %H:%M") if org.criado_em else "—"
     local = " / ".join([p for p in [(org.cidade or "").strip(), (org.uf or "").strip()] if p]) or "—"
+    # Expiração do teste (trial)
+    if org.status == "trial" and org.acesso_ate:
+        dias = (org.acesso_ate - date.today()).days
+        data_txt = org.acesso_ate.strftime("%d/%m/%Y")
+        if dias > 0:
+            trial_val = f'<b>{data_txt}</b> <span style="color:#1b5e20">(faltam {dias} dia(s))</span>'
+        elif dias == 0:
+            trial_val = f'<b>{data_txt}</b> <span style="color:#9a6700">(expira hoje)</span>'
+        else:
+            trial_val = f'<b>{data_txt}</b> <span style="color:#c0392b">(expirado há {abs(dias)} dia(s))</span>'
+    elif org.status == "trial":
+        trial_val = "sem data definida"
+    else:
+        trial_val = "— (conta não está em teste)"
     linhas_cad = "".join([
         _lin_cad("Escritório / Razão", org.nome),
         _lin_cad("CPF / CNPJ", _fmt_documento(org.documento)),
@@ -2657,6 +2671,7 @@ def admin_org(oid):
         _lin_cad("Telefone", org.telefone),
         _lin_cad("Cidade / UF", local),
         _lin_cad("Plano", plano_nome),
+        _lin_cad("Teste (trial) expira em", trial_val),
         _lin_cad("Cadastro em", criado_fmt),
         _lin_cad("ID Asaas (cliente)", org.asaas_customer_id),
     ])
