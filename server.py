@@ -2580,10 +2580,19 @@ def admin_assinantes():
                              f"onsubmit=\"return confirm('EXCLUIR {u.email}? Isso apaga {alvo}. Não pode ser desfeito.')\">"
                              f'<button class="btn-x">🗑 excluir</button></form>')
         nome_cel = f'<a href="/admin/org/{u.org_id}"><b>{u.nome or "—"}</b></a>' if u.org_id else f'<b>{u.nome or "—"}</b>'
+        trial_info = ""
+        if org and org.status == "trial" and org.acesso_ate:
+            dias = (org.acesso_ate - date.today()).days
+            if dias > 0:
+                trial_info = f'<br><small style="color:#1b5e20">⏳ trial: {dias} dia(s)</small>'
+            elif dias == 0:
+                trial_info = '<br><small style="color:#9a6700">⏳ trial: expira hoje</small>'
+            else:
+                trial_info = f'<br><small style="color:#c0392b">⏳ trial: expirado há {abs(dias)}d</small>'
         linhas += f"""<tr>
           <td>{nome_cel}{selo_admin}<br><small>{u.email}</small></td>
           <td>{u.escritorio or '—'}<br><small>{plano} · {papel}</small>{extra}</td>
-          <td><b>{u.status_efetivo}</b></td>
+          <td><b>{u.status_efetivo}</b>{trial_info}</td>
           <td>{uso_mes}/{u.limite_mensal}<br><small>cota pessoal</small></td>
           <td>
             <a href="/admin/status/{u.id}/ativo">ativar</a> ·
