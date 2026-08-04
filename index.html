@@ -56,7 +56,12 @@
 
     body {
       font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-      background: var(--bg);
+      background-color: var(--bg);
+      background-image:
+        radial-gradient(900px 520px at 8% -10%, rgba(44,95,138,0.12), transparent 55%),
+        radial-gradient(820px 520px at 110% -6%, rgba(230,184,77,0.13), transparent 52%),
+        linear-gradient(180deg, #eef2f8 0%, rgba(245,247,251,0) 60%);
+      background-repeat: no-repeat;
       color: var(--text);
       min-height: 100vh;
       line-height: 1.55;
@@ -102,7 +107,8 @@
     }
 
     header {
-      background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary-light) 100%);
+      background: linear-gradient(135deg, #12293f 0%, #1a3a5c 55%, #245089 100%);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
       color: #fff;
       padding: 18px 40px;
       display: flex;
@@ -515,8 +521,8 @@
     .btn-primary { background: var(--primary); color: #fff; box-shadow: var(--shadow-sm); }
     .btn-primary:hover { background: var(--primary-light); box-shadow: var(--shadow); }
 
-    .btn-accent { background: var(--accent); color: #fff; box-shadow: var(--shadow-sm); }
-    .btn-accent:hover { background: var(--accent-strong); box-shadow: var(--shadow); }
+    .btn-accent { background: linear-gradient(135deg, #bf8f1e, #d9a92e); color: #fff; box-shadow: 0 4px 14px rgba(191,143,30,0.32); }
+    .btn-accent:hover { background: linear-gradient(135deg, #b3851a, #cf9f28); box-shadow: 0 7px 20px rgba(191,143,30,0.42); transform: translateY(-1px); }
 
     .btn-lg { padding: 15px 34px; font-size: var(--fs-md); border-radius: var(--radius); }
 
