@@ -2421,6 +2421,22 @@ small{color:#8a97a5;font-weight:400}
 .btn-x{background:#fdecea;color:#a3271a;border:none;border-radius:7px;padding:5px 11px;font-size:.76rem;font-weight:700;cursor:pointer}
 .btn-x:hover{background:#a3271a;color:#fff}
 .nota{font-size:.76rem;color:#8a97a5;margin-top:10px}
+@media(max-width:820px){
+  /* fallback: qualquer tabela do admin rola na horizontal sem quebrar o layout */
+  table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+  /* tabelas marcadas viram cartões empilhados (sem rolagem lateral) */
+  table.tbl-cards{display:block;overflow:visible;white-space:normal;background:transparent;border:none;box-shadow:none;border-radius:0}
+  table.tbl-cards thead{display:none}
+  table.tbl-cards tbody{display:block}
+  table.tbl-cards tr{display:block;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 22px rgba(16,33,51,.07);padding:6px 6px;margin-bottom:12px}
+  table.tbl-cards tr:hover td{background:transparent}
+  table.tbl-cards td{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:9px 12px;border-bottom:1px solid #f3f5f8;text-align:right;font-size:.86rem}
+  table.tbl-cards td::before{content:attr(data-label);font-size:.68rem;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:700;text-align:left;flex:none;white-space:nowrap}
+  table.tbl-cards td:first-child{display:block;text-align:left;font-size:.95rem;border-bottom:1px solid #eef1f5;padding-bottom:10px}
+  table.tbl-cards td:first-child::before{display:none}
+  table.tbl-cards td:last-child{display:block;text-align:left;border-bottom:none}
+  table.tbl-cards td:last-child::before{display:block;margin-bottom:7px}
+}
 </style></head><body>
 <aside>
   <div class="s-logo">{{LOGO}} <div>Repactua<small>Painel Master</small></div></div>
@@ -2651,11 +2667,11 @@ def admin_assinantes():
             else:
                 trial_info = f'<br><small style="color:#c0392b">⏳ trial: expirado há {abs(dias)}d</small>'
         linhas += f"""<tr>
-          <td>{nome_cel}{selo_admin}<br><small>{u.email}</small></td>
-          <td>{u.escritorio or '—'}<br><small>{plano} · {papel}</small>{extra}</td>
-          <td><b>{u.status_efetivo}</b>{trial_info}</td>
-          <td>{uso_mes}/{u.limite_mensal}<br><small>cota pessoal</small></td>
-          <td>
+          <td data-label="Advogado">{nome_cel}{selo_admin}<br><small>{u.email}</small></td>
+          <td data-label="Escritório">{u.escritorio or '—'}<br><small>{plano} · {papel}</small>{extra}</td>
+          <td data-label="Status"><b>{u.status_efetivo}</b>{trial_info}</td>
+          <td data-label="Uso/mês">{uso_mes}/{u.limite_mensal}<br><small>cota pessoal</small></td>
+          <td data-label="Ações">
             <a href="/admin/status/{u.id}/ativo">ativar</a> ·
             <a href="/admin/status/{u.id}/inativo">inativar</a> ·
             <a href="/admin/status/{u.id}/trial">trial</a><br>
@@ -2670,7 +2686,7 @@ def admin_assinantes():
       <input class="busca" id="busca" onkeyup="filtrarTabela()" placeholder="🔍 Buscar por nome, e-mail, plano...">
       <a href="/admin/export/assinantes.csv" style="background:#1a3a5c;color:#fff;text-decoration:none;padding:10px 14px;border-radius:8px;font-size:.82rem;font-weight:700">⬇ Exportar CSV</a>
     </div>
-    <table><thead><tr><th>Advogado</th><th>Escritório / plano</th><th>Status</th><th>Uso/mês</th><th>Ações</th></tr></thead>
+    <table class="tbl-cards"><thead><tr><th>Advogado</th><th>Escritório / plano</th><th>Status</th><th>Uso/mês</th><th>Ações</th></tr></thead>
     <tbody id="tbAssinantes">{linhas}</tbody></table>
     <p class="nota">Excluir um <b>dono</b> apaga o escritório inteiro (membros e casos). Excluir um <b>membro</b> apaga só aquele login. Admins protegidos não podem ser excluídos.</p>"""
     js = """<script>
