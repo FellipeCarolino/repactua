@@ -40,6 +40,8 @@ from flask_login import (
     LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 )
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.exceptions import HTTPException
+import traceback
 import anthropic
 
 # ============================================================
@@ -226,6 +228,12 @@ if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# Conexões resilientes: testa a conexão antes de usar (pool_pre_ping) e recicla a cada 5 min —
+# elimina erros 500 com conexões mortas após restart/manutenção do Postgres.
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+}
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
@@ -289,7 +297,7 @@ class User(UserMixin, db.Model):
     usage_contagem = db.Column(db.Integer, default=0)
     asaas_customer_id = db.Column(db.String(120))  # legado — migrado para o Escritório
     criado_em = db.Column(db.DateTime, default=datetime.utcnow)
-    org_id = db.Column(db.Integer, db.ForeignKey("escritorio.id"))
+    org_id = db.Column(db.Integer, db.ForeignKey("escritorio.id"), index=True)
     papel = db.Column(db.String(20), default="dono")  # dono | membro
     cota_mensal = db.Column(db.Integer, default=50)    # créditos atribuídos a este usuário
     reset_token = db.Column(db.String(80))             # recuperação de senha
@@ -412,6 +420,10 @@ def _migrar_schema():
         'ALTER TABLE "user" ADD COLUMN confirm_token VARCHAR(80)',
         # contas que já existiam antes da confirmação por e-mail ficam confirmadas (não travar ninguém)
         'UPDATE "user" SET email_confirmado = TRUE WHERE email_confirmado IS NULL',
+        # índices p/ consultas frequentes (idempotentes)
+        'CREATE INDEX IF NOT EXISTS ix_user_org_id ON "user" (org_id)',
+        'CREATE INDEX IF NOT EXISTS ix_caso_user_id ON caso (user_id)',
+        'CREATE INDEX IF NOT EXISTS ix_logadmin_quando ON log_admin (quando)',
     ):
         try:
             db.session.execute(text(ddl))
@@ -1336,6 +1348,42 @@ def _html_sem_cache(resp):
     if _EM_PRODUCAO:
         resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return resp
+
+
+# --- Monitoramento de erros: loga o traceback e avisa o admin por e-mail (com trava anti-tempestade) ---
+_ULTIMO_ALERTA_ERRO = {}  # {tipo_da_excecao: datetime do último e-mail}
+_INTERVALO_ALERTA_S = 900  # no máximo 1 e-mail a cada 15 min por tipo de erro
+
+
+@app.errorhandler(Exception)
+def _erro_nao_tratado(e):
+    if isinstance(e, HTTPException):  # 404, 405 etc. seguem o fluxo normal
+        return e
+    tb = traceback.format_exc()
+    app.logger.error("ERRO 500 em %s %s\n%s", request.method, request.path, tb)
+    try:
+        db.session.rollback()  # não deixa a sessão do banco suja p/ os próximos requests
+    except Exception:
+        pass
+    tipo = type(e).__name__
+    agora = datetime.utcnow()
+    ultimo = _ULTIMO_ALERTA_ERRO.get(tipo)
+    if not ultimo or (agora - ultimo).total_seconds() > _INTERVALO_ALERTA_S:
+        _ULTIMO_ALERTA_ERRO[tipo] = agora
+        quem = current_user.email if getattr(current_user, "is_authenticated", False) else "anônimo"
+        _enviar_email(
+            f"🚨 Repactua: erro {tipo} em {request.path}",
+            f"Erro não tratado no servidor:\n\n{request.method} {request.path}\nUsuário: {quem}\n\n{tb[-3000:]}")
+    return Response("""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Erro · Repactua</title></head>
+<body style="font-family:system-ui,sans-serif;background:#f5f7fa;color:#17293b;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
+<div style="text-align:center;padding:32px;max-width:440px">
+<div style="font-size:44px">⚠️</div>
+<h1 style="color:#1a3a5c;font-size:1.3rem;margin:12px 0 8px">Algo deu errado por aqui</h1>
+<p style="color:#5d6b7b;font-size:.95rem;line-height:1.6">Nossa equipe já foi avisada automaticamente.
+Tente novamente em instantes — seus dados estão seguros.</p>
+<a href="/" style="display:inline-block;margin-top:16px;background:#bf8f1e;color:#fff;text-decoration:none;padding:11px 22px;border-radius:9px;font-weight:700">← Voltar ao início</a>
+</div></body></html>""", status=500, mimetype="text/html")
 
 
 @app.route("/")

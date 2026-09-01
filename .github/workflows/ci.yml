@@ -1,0 +1,23 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install -r requirements.txt pytest
+      - name: Sintaxe do server.py
+        run: python -c "import ast; ast.parse(open('server.py').read())"
+      - name: Smoke-tests
+        env:
+          ANTHROPIC_API_KEY: chave-de-teste
+          SECRET_KEY: segredo-de-teste
+        run: pytest -q
