@@ -258,6 +258,7 @@ class Escritorio(db.Model):
     creditos_total = db.Column(db.Integer, default=50)  # pool de consultas/mês do escritório
     timbre = db.Column(db.Text)  # JSON do timbre da petição (compartilhado pelo escritório)
     documento = db.Column(db.String(20))  # CPF ou CNPJ (só dígitos) informado no cadastro
+    aviso_fim = db.Column(db.Boolean, default=False)  # e-mail "seu teste está acabando" já enviado
     telefone = db.Column(db.String(30))
     cidade = db.Column(db.String(120))
     uf = db.Column(db.String(4))
@@ -378,6 +379,14 @@ class Visita(db.Model):
     origem = db.Column(db.String(200))
 
 
+class Evento(db.Model):
+    """Eventos do funil de conversão (analytics próprio, sem dados pessoais)."""
+    __tablename__ = "evento"
+    id = db.Column(db.Integer, primary_key=True)
+    quando = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    nome = db.Column(db.String(60), index=True)  # signup_view | signup_ok | email_confirmado | assinatura_ativa
+
+
 class Caso(db.Model):
     """Caso salvo de análise — fica no servidor, compartilhado pelo escritório."""
     __tablename__ = "caso"
@@ -416,6 +425,7 @@ def _migrar_schema():
         'ALTER TABLE escritorio ADD COLUMN uf VARCHAR(4)',
         'ALTER TABLE escritorio ADD COLUMN acesso_ate DATE',
         'ALTER TABLE escritorio ADD COLUMN documento VARCHAR(20)',
+        'ALTER TABLE escritorio ADD COLUMN aviso_fim BOOLEAN',
         'ALTER TABLE "user" ADD COLUMN email_confirmado BOOLEAN',
         'ALTER TABLE "user" ADD COLUMN confirm_token VARCHAR(80)',
         # contas que já existiam antes da confirmação por e-mail ficam confirmadas (não travar ninguém)
@@ -1036,6 +1046,8 @@ def _enviar_confirmacao(user):
 def pagina_signup():
     if current_user.is_authenticated:
         return redirect(url_for("index"))
+    if request.method == "GET":
+        _evento("signup_view")
     msg = ""
     if request.method == "POST":
         nome = (request.form.get("nome") or "").strip()
@@ -1078,6 +1090,7 @@ def pagina_signup():
                 user.is_admin = True
             db.session.add(user)
             db.session.commit()
+            _evento("signup_ok")
             _enviar_email("🆕 Repactua: novo cadastro" + ("" if auto_ok else " (aguardando confirmação de e-mail)"),
                           f"Nova conta criada: {nome or email} <{email}>"
                           f"{' · escritório: ' + escritorio if escritorio else ''}")
@@ -1126,6 +1139,7 @@ def confirmar_email():
     user.email_confirmado = True
     user.confirm_token = None
     db.session.commit()
+    _evento("email_confirmado")
     login_user(user, remember=True)
     return redirect(url_for("index"))
 
@@ -1309,6 +1323,15 @@ def pagina_privacidade():
 # ============================================================
 # Rotas — Aplicação
 # ============================================================
+def _evento(nome):
+    """Registra um evento do funil (nunca derruba o fluxo principal)."""
+    try:
+        db.session.add(Evento(nome=nome))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 def _registrar_visita():
     try:
         utm = (request.args.get("utm_source") or "").strip()[:80]
@@ -1667,8 +1690,70 @@ def extract_registrato():
     return _endpoint_extrair(PROMPT_REGISTRATO, SCHEMA_REGISTRATO, "registrato")
 
 
+def _regua_diaria():
+    """Tarefas diárias sem cron: disparadas pelo ping do monitoramento no /api/health.
+    Um marcador no LogAdmin garante execução no máximo 1x por dia."""
+    try:
+        hoje = datetime.utcnow().date()
+        marca = LogAdmin.query.filter_by(acao="régua diária").order_by(LogAdmin.quando.desc()).first()
+        if marca and marca.quando and marca.quando.date() >= hoje:
+            return
+        db.session.add(LogAdmin(admin_email="sistema", acao="régua diária"))
+        db.session.commit()
+        if not email_ativo():
+            return
+        # Trials que expiram amanhã (ou hoje) e ainda não foram avisados → e-mail com CTA
+        alvo = Escritorio.query.filter(
+            Escritorio.status == "trial",
+            Escritorio.acesso_ate.isnot(None),
+            Escritorio.acesso_ate <= hoje + timedelta(days=1),
+            Escritorio.acesso_ate >= hoje,
+        ).all()
+        for org in alvo:
+            if org.aviso_fim:
+                continue
+            dono = next((u for u in (org.usuarios or []) if (u.papel or "dono") == "dono"), None)
+            if not dono:
+                continue
+            quando_txt = "amanhã" if org.acesso_ate > hoje else "hoje"
+            _enviar_email(
+                f"Seu teste do Repactua termina {quando_txt} ⏳",
+                f"Olá{', ' + dono.nome if dono.nome else ''}!\n\n"
+                f"Seu período de teste gratuito do Repactua termina {quando_txt} "
+                f"({org.acesso_ate.strftime('%d/%m/%Y')}).\n\n"
+                "Para continuar usando a leitura de holerites e contratos por IA, os cálculos da "
+                "Lei 14.181/2021 e a geração de petições, assine em:\n\n"
+                "  👉 https://repactua.com.br/assinar\n\n"
+                "Plano Individual: R$ 129,90/mês (50 consultas de IA)\n"
+                "Plano Escritório: R$ 229,90/mês (até 5 acessos, 250 consultas)\n\n"
+                "Seus casos salvos continuam guardados e voltam a ficar acessíveis assim que a "
+                "assinatura for ativada.\n\nQualquer dúvida, é só responder este e-mail.\n\n"
+                "Equipe Repactua · repactua.com.br",
+                para=dono.email)
+            org.aviso_fim = True
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    return Response("User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /conta\n"
+                    "Sitemap: https://repactua.com.br/sitemap.xml\n", mimetype="text/plain")
+
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    paginas = ["/", "/signup", "/login", "/termos", "/privacidade"]
+    urls = "".join(f"<url><loc>https://repactua.com.br{p}</loc></url>" for p in paginas)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                    f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>',
+                    mimetype="application/xml")
+
+
 @app.route("/api/health")
 def health():
+    _regua_diaria()
     try:
         dialect = db.engine.dialect.name  # "postgresql" (permanente) ou "sqlite" (temporário)
     except Exception:
@@ -2365,6 +2450,8 @@ def asaas_webhook():
         org = u.org if u else None
     if org:
         if tipo in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
+            if org.status != "ativo":
+                _evento("assinatura_ativa")  # só na 1ª ativação (renovações não contam no funil)
             org.status = "ativo"
             org.acesso_ate = date.today() + timedelta(days=37)  # 1 mês + folga
             if cust_id and not org.asaas_customer_id:
@@ -2604,6 +2691,41 @@ def admin():
     conv_pct = round(pagantes * 100 / len(orgs)) if orgs else 0
     agora = datetime.utcnow()
     v_hoje = Visita.query.filter(Visita.quando >= agora.replace(hour=0, minute=0, second=0)).count()
+
+    # Funil de conversão (últimos 30 dias)
+    def _ev30(nome):
+        try:
+            return Evento.query.filter(Evento.nome == nome,
+                                       Evento.quando >= agora - timedelta(days=30)).count()
+        except Exception:
+            return 0
+    f_view, f_cad, f_conf, f_assin = (_ev30("signup_view"), _ev30("signup_ok"),
+                                      _ev30("email_confirmado"), _ev30("assinatura_ativa"))
+    def _pct(a, b):
+        return f"{round(a * 100 / b)}%" if b else "—"
+    funil_html = f"""
+    <h2>Funil de conversão (30 dias)</h2>
+    <div class="painel" style="display:flex;gap:0;align-items:stretch;flex-wrap:wrap">
+      <div style="flex:1;min-width:130px;padding:10px 14px">
+        <div style="font-size:.7rem;text-transform:uppercase;color:#5d6b7b;font-weight:700">Visitas landing</div>
+        <div style="font-size:1.4rem;font-weight:800;color:#1a3a5c">{v_30d}</div></div>
+      <div style="flex:1;min-width:130px;padding:10px 14px;border-left:1px solid #eef1f5">
+        <div style="font-size:.7rem;text-transform:uppercase;color:#5d6b7b;font-weight:700">Abriram cadastro</div>
+        <div style="font-size:1.4rem;font-weight:800;color:#1a3a5c">{f_view}</div>
+        <div style="font-size:.72rem;color:#8a97a5">{_pct(f_view, v_30d)} das visitas</div></div>
+      <div style="flex:1;min-width:130px;padding:10px 14px;border-left:1px solid #eef1f5">
+        <div style="font-size:.7rem;text-transform:uppercase;color:#5d6b7b;font-weight:700">Criaram conta</div>
+        <div style="font-size:1.4rem;font-weight:800;color:#1a3a5c">{f_cad}</div>
+        <div style="font-size:.72rem;color:#8a97a5">{_pct(f_cad, f_view)} de quem abriu</div></div>
+      <div style="flex:1;min-width:130px;padding:10px 14px;border-left:1px solid #eef1f5">
+        <div style="font-size:.7rem;text-transform:uppercase;color:#5d6b7b;font-weight:700">Confirmaram e-mail</div>
+        <div style="font-size:1.4rem;font-weight:800;color:#1a3a5c">{f_conf}</div>
+        <div style="font-size:.72rem;color:#8a97a5">{_pct(f_conf, f_cad)} dos cadastros</div></div>
+      <div style="flex:1;min-width:130px;padding:10px 14px;border-left:1px solid #eef1f5">
+        <div style="font-size:.7rem;text-transform:uppercase;color:#5d6b7b;font-weight:700">Assinaram 💰</div>
+        <div style="font-size:1.4rem;font-weight:800;color:#1e7e34">{f_assin}</div>
+        <div style="font-size:.72rem;color:#8a97a5">{_pct(f_assin, f_conf)} dos confirmados</div></div>
+    </div>"""
     v_7d = Visita.query.filter(Visita.quando >= agora - timedelta(days=7)).count()
     v_30d = Visita.query.filter(Visita.quando >= agora - timedelta(days=30)).count()
     top = db.session.query(Visita.origem, db.func.count(Visita.id)).filter(
@@ -2679,6 +2801,7 @@ def admin():
       <div class="mc ouro"><div class="lbl">Visitas na landing (7d)</div><div class="val">{v_7d}</div><div class="det">hoje {v_hoje} · 30d {v_30d}</div></div>
       <div class="mc"><div class="lbl">Origem top (30d)</div><div class="val" style="font-size:.95rem;line-height:1.3">{origem_top}</div><div class="det">utm_source ou site de origem</div></div>
     </div>
+    {funil_html}
     <div class="duas">
       <div><h2>📈 Receita recebida (6 meses)</h2>
         <div class="painel"><canvas id="grafReceita" height="200"></canvas></div></div>
