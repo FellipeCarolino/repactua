@@ -209,6 +209,18 @@ ADMIN_EMAIL = (os.environ.get("ADMIN_EMAIL") or "fellipe.carolino18@gmail.com").
 app = Flask(__name__, static_folder=None)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "troque-este-segredo-em-producao")
 
+# --- Endurecimento de sessão/cookies ---
+# Em produção (Railway injeta DATABASE_URL) o cookie só trafega por HTTPS.
+_EM_PRODUCAO = bool(os.environ.get("DATABASE_URL"))
+app.config["SESSION_COOKIE_SECURE"] = _EM_PRODUCAO
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # bloqueia POST cross-site (anti-CSRF de base)
+app.config["REMEMBER_COOKIE_SECURE"] = _EM_PRODUCAO
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
+app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)  # "lembrar de mim" expira em 30 dias
+ADMIN_SESSAO_HORAS = 8  # sessão do painel admin expira e pede login de novo
+
 db_url = os.environ.get("DATABASE_URL", "sqlite:///" + os.path.join(BASE_DIR, "calculadora.db"))
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
@@ -1019,7 +1031,9 @@ def pagina_signup():
         senha = request.form.get("senha") or ""
         escritorio = (request.form.get("escritorio") or "").strip()
         documento = _so_digitos(request.form.get("documento"))
-        if not request.form.get("aceite"):
+        if _limitado("signup:" + _ip_cliente(), maximo=8, janela_s=3600):
+            msg = MSG_MUITAS_TENTATIVAS
+        elif not request.form.get("aceite"):
             msg = '<div class="erro">Para criar a conta é necessário aceitar os Termos de Uso e a Política de Privacidade.</div>'
         elif not _email_valido(email):
             msg = '<div class="erro">Informe um e-mail válido.</div>'
@@ -1107,7 +1121,7 @@ def confirmar_email():
 @app.route("/reenviar-confirmacao", methods=["GET", "POST"])
 def reenviar_confirmacao():
     email = (request.values.get("email") or "").strip().lower()
-    if email:
+    if email and not _limitado("reconf:" + _ip_cliente(), maximo=5, janela_s=3600):
         user = User.query.filter_by(email=email).first()
         if user and not user.email_confirmado:
             _enviar_confirmacao(user)
@@ -1314,6 +1328,13 @@ def _html_sem_cache(resp):
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
+    # Cabeçalhos de segurança (todas as respostas)
+    resp.headers.setdefault("X-Frame-Options", "DENY")               # impede o site dentro de iframe (clickjacking)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if _EM_PRODUCAO:
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return resp
 
 
@@ -2327,10 +2348,32 @@ def asaas_webhook():
 # Admin (gestão simples de assinantes) — login próprio, separado do app
 # ============================================================
 def _admin_logado():
-    """Admin via sessão própria (login separado) OU usuário logado que é admin."""
+    """Admin via sessão própria (login separado) OU usuário logado que é admin.
+    A sessão do painel expira após ADMIN_SESSAO_HORAS e pede login de novo."""
     if session.get("admin_ok"):
-        return True
+        desde = session.get("admin_desde")
+        try:
+            if desde and (datetime.utcnow() - datetime.fromisoformat(desde)) > timedelta(hours=ADMIN_SESSAO_HORAS):
+                session.pop("admin_ok", None)
+                session.pop("admin_desde", None)
+            else:
+                return True
+        except (ValueError, TypeError):
+            session.pop("admin_ok", None)
     return current_user.is_authenticated and current_user.is_admin
+
+
+def _admin_csrf():
+    """Token anti-CSRF das ações do painel (gera se ainda não existir na sessão)."""
+    if not session.get("admin_csrf"):
+        session["admin_csrf"] = secrets.token_urlsafe(24)
+    return session["admin_csrf"]
+
+
+def _admin_csrf_ok():
+    """Confere o token enviado (query `t` ou campo de formulário) com o da sessão."""
+    tok = request.values.get("t") or ""
+    return bool(tok) and secrets.compare_digest(tok, session.get("admin_csrf") or "")
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
@@ -2348,6 +2391,8 @@ def admin_login():
         if u and u.is_admin and u.conferir_senha(senha):
             session["admin_ok"] = True
             session["admin_email"] = email
+            session["admin_desde"] = datetime.utcnow().isoformat()
+            session["admin_csrf"] = secrets.token_urlsafe(24)  # token das ações do painel
             return redirect(url_for("admin"))
         erro = '<div class="erro">Credenciais inválidas ou conta sem permissão de admin.</div>'
     corpo = f"""<h2>Painel Administrativo</h2>
@@ -2629,6 +2674,7 @@ def admin_assinantes():
         ts = u.criado_em.timestamp() if u.criado_em else 0
         return (1, -ts)
     users = sorted(User.query.all(), key=_chave_ordem)
+    tok = _admin_csrf()
     linhas = ""
     for u in users:
         org = u.org
@@ -2644,15 +2690,16 @@ def admin_assinantes():
         selo_admin = ' <span style="background:#1a3a5c;color:#e6b84d;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:700">ADMIN</span>' if u.is_admin else ''
         protegido = (u.email == ADMIN_EMAIL) or (u.email == session.get("admin_email"))
         if u.is_admin:
-            link_admin = '<span style="color:#aaa;font-size:.8rem">admin protegido</span>' if protegido else f'<a href="/admin/admin/{u.id}/0">remover admin</a>'
+            link_admin = '<span style="color:#aaa;font-size:.8rem">admin protegido</span>' if protegido else f'<a href="/admin/admin/{u.id}/0?t={tok}">remover admin</a>'
         else:
-            link_admin = f'<a href="/admin/admin/{u.id}/1">tornar admin</a>'
+            link_admin = f'<a href="/admin/admin/{u.id}/1?t={tok}">tornar admin</a>'
         if protegido:
             botao_excluir = ""
         else:
             alvo = "a CONTA INTEIRA (escritório, membros e casos)" if papel == "dono" else "este login"
             botao_excluir = (f'<form method="post" action="/admin/excluir/{u.id}" style="display:inline" '
                              f"onsubmit=\"return confirm('EXCLUIR {u.email}? Isso apaga {alvo}. Não pode ser desfeito.')\">"
+                             f'<input type="hidden" name="t" value="{tok}">'
                              f'<button class="btn-x">🗑 excluir</button></form>')
         nome_cel = f'<a href="/admin/org/{u.org_id}"><b>{u.nome or "—"}</b></a>' if u.org_id else f'<b>{u.nome or "—"}</b>'
         trial_info = ""
@@ -2670,11 +2717,11 @@ def admin_assinantes():
           <td data-label="Status"><b>{u.status_efetivo}</b>{trial_info}</td>
           <td data-label="Uso/mês">{uso_mes}/{u.limite_mensal}<br><small>cota pessoal</small></td>
           <td data-label="Ações">
-            <a href="/admin/status/{u.id}/ativo">ativar</a> ·
-            <a href="/admin/status/{u.id}/inativo">inativar</a> ·
-            <a href="/admin/status/{u.id}/trial">trial</a><br>
-            <a href="/admin/plano/{u.id}/escritorio">→ escritório (cortesia)</a> ·
-            <a href="/admin/plano/{u.id}/individual">→ individual</a><br>
+            <a href="/admin/status/{u.id}/ativo?t={tok}">ativar</a> ·
+            <a href="/admin/status/{u.id}/inativo?t={tok}">inativar</a> ·
+            <a href="/admin/status/{u.id}/trial?t={tok}">trial</a><br>
+            <a href="/admin/plano/{u.id}/escritorio?t={tok}">→ escritório (cortesia)</a> ·
+            <a href="/admin/plano/{u.id}/individual?t={tok}">→ individual</a><br>
             {link_admin} &nbsp; {botao_excluir}
           </td></tr>"""
     conteudo = f"""
@@ -2760,6 +2807,7 @@ def admin_org(oid):
         _lin_cad("ID Asaas (cliente)", org.asaas_customer_id),
     ])
 
+    tok = _admin_csrf()
     linhas_m = ""
     for m in sorted(org.usuarios or [], key=lambda x: (x.papel != "dono", x.email)):
         uso = (m.usage_contagem or 0) if m.usage_mes == mes else 0
@@ -2767,12 +2815,14 @@ def admin_org(oid):
         acoes = f"""
           <form method="post" action="/admin/resetsenha/{m.id}" style="display:inline"
             onsubmit="return confirm('Gerar senha temporária para {m.email}?')">
+            <input type="hidden" name="t" value="{tok}">
             <button class="btn-mini">🔑 nova senha</button></form>
           <form method="post" action="/admin/resetuso/{m.id}" style="display:inline"
             onsubmit="return confirm('Zerar o uso do mês de {m.email}?')">
+            <input type="hidden" name="t" value="{tok}">
             <button class="btn-mini">♻️ zerar uso</button></form>
           <a class="btn-mini" style="text-decoration:none;display:inline-block"
-             href="/admin/entrar-como/{m.id}"
+             href="/admin/entrar-como/{m.id}?t={tok}"
              onclick="return confirm('Entrar como {m.email}? Você verá o sistema como este cliente.')">👁 entrar como</a>"""
         if protegido:
             acoes = '<span style="color:#aaa;font-size:.78rem">admin protegido</span>'
@@ -2780,6 +2830,7 @@ def admin_org(oid):
           <td>{m.nome or '—'}<br><small>{m.email}</small></td>
           <td>{m.papel or 'dono'}</td>
           <td><form method="post" action="/admin/cota/{m.id}" style="display:flex;gap:6px">
+            <input type="hidden" name="t" value="{tok}">
             <input type="number" name="cota" value="{m.cota_mensal or 0}" min="0"
               style="width:76px;padding:5px 8px;border:1.5px solid #d0d7e2;border-radius:6px">
             <button class="btn-mini">salvar</button></form></td>
@@ -2814,12 +2865,12 @@ def admin_org(oid):
     <div class="cards">
       <div class="mc"><div class="lbl">Plano</div><div class="val" style="font-size:1.1rem">{plano_nome}</div>
         <div class="det">🎁 <b>cortesia vitalícia</b> (sem cobrança, nunca expira):
-        <a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/individual?next={ret}"
+        <a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/individual?next={ret}&t={tok}"
            onclick="return confirm('Conceder acesso VITALÍCIO no plano Individual (cortesia, sem Asaas, nunca expira)?')">→ individual</a>
-        · <a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/escritorio?next={ret}"
+        · <a href="/admin/plano/{org.usuarios[0].id if org.usuarios else 0}/escritorio?next={ret}&t={tok}"
            onclick="return confirm('Conceder acesso VITALÍCIO no plano Escritório (cortesia, sem Asaas, nunca expira)?')">→ escritório</a></div></div>
       <div class="mc"><div class="lbl">Situação</div><div class="val" style="font-size:1.1rem"><span class="badge {cls}">{org.status}</span></div>
-        <div class="det"><a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/ativo?next={ret}">ativar</a> · <a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/inativo?next={ret}">inativar</a> · <a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/trial?next={ret}">trial</a></div></div>
+        <div class="det"><a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/ativo?next={ret}&t={tok}">ativar</a> · <a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/inativo?next={ret}&t={tok}">inativar</a> · <a href="/admin/status/{org.usuarios[0].id if org.usuarios else 0}/trial?next={ret}&t={tok}">trial</a></div></div>
       <div class="mc"><div class="lbl">Acesso válido até</div><div class="val" style="font-size:1.1rem">{validade}</div>
         <div class="det">{'assinatura ativa' if org.asaas_subscription_id else 'sem assinatura paga'}</div></div>
       <div class="mc"><div class="lbl">Pool de créditos</div><div class="val" style="font-size:1.1rem">{org.cota_distribuida}/{org.creditos_total}</div>
@@ -2841,7 +2892,7 @@ def admin_org(oid):
 
 @app.route("/admin/cota/<int:uid>", methods=["POST"])
 def admin_cota(uid):
-    if not _admin_logado():
+    if not _admin_logado() or not _admin_csrf_ok():
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if u:
@@ -2856,7 +2907,7 @@ def admin_cota(uid):
 
 @app.route("/admin/resetuso/<int:uid>", methods=["POST"])
 def admin_resetuso(uid):
-    if not _admin_logado():
+    if not _admin_logado() or not _admin_csrf_ok():
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if u:
@@ -2869,7 +2920,7 @@ def admin_resetuso(uid):
 
 @app.route("/admin/resetsenha/<int:uid>", methods=["POST"])
 def admin_resetsenha(uid):
-    if not _admin_logado():
+    if not _admin_logado() or not _admin_csrf_ok():
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if not u or u.email == ADMIN_EMAIL or u.email == session.get("admin_email"):
@@ -2884,7 +2935,7 @@ def admin_resetsenha(uid):
 @app.route("/admin/entrar-como/<int:uid>")
 def admin_entrar_como(uid):
     """Loga como o cliente para dar suporte (a sessão de admin continua ativa)."""
-    if not _admin_logado():
+    if not _admin_logado() or not _admin_csrf_ok():
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if not u:
@@ -2897,7 +2948,7 @@ def admin_entrar_como(uid):
 @app.route("/admin/excluir/<int:uid>", methods=["POST"])
 def admin_excluir(uid):
     """Exclui um login (membro) ou a conta inteira (dono: escritório+membros+casos)."""
-    if not _admin_logado():
+    if not _admin_logado() or not _admin_csrf_ok():
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if not u or u.email == ADMIN_EMAIL or u.email == session.get("admin_email"):
@@ -3010,7 +3061,7 @@ def export_pagamentos():
 
 @app.route("/admin/status/<int:uid>/<novo>")
 def admin_status(uid, novo):
-    if not _admin_logado() or novo not in ("ativo", "inativo", "trial"):
+    if not _admin_logado() or not _admin_csrf_ok() or novo not in ("ativo", "inativo", "trial"):
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if u:
@@ -3026,7 +3077,7 @@ def admin_status(uid, novo):
 @app.route("/admin/admin/<int:uid>/<int:val>")
 def admin_set_admin(uid, val):
     """Promove (val=1) ou remove (val=0) um usuário como admin do painel."""
-    if not _admin_logado():
+    if not _admin_logado() or not _admin_csrf_ok():
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if u:
@@ -3044,7 +3095,7 @@ def admin_set_admin(uid, val):
 @app.route("/admin/plano/<int:uid>/<plano>")
 def admin_plano(uid, plano):
     """Define o plano do escritório do usuário como cortesia (ativa sem cobrança)."""
-    if not _admin_logado() or plano not in PLANOS:
+    if not _admin_logado() or not _admin_csrf_ok() or plano not in PLANOS:
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if u and u.org:
