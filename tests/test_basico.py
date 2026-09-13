@@ -307,3 +307,17 @@ def test_inicio_avisa_pagamento_pendente():
     html = _logado(uid).get("/").get_data(as_text=True)
     assert "Pagamento pendente" in html
     assert "https://www.asaas.com/i/teste123" in html
+
+
+def test_paineis_do_admin_carregam():
+    """Regressão: o dashboard do admin chegou a dar 500 (variável usada antes de existir)."""
+    from datetime import datetime as _dt
+    uid, email, oid = _usuario_teste(admin=True)
+    c = _client()
+    with c.session_transaction() as s:
+        s["admin_ok"] = True
+        s["admin_email"] = email
+        s["admin_desde"] = _dt.utcnow().isoformat()
+        s["admin_csrf"] = "tok"
+    for rota in ["/admin", "/admin/assinantes", f"/admin/org/{oid}", "/admin/financeiro", "/admin/logs"]:
+        assert c.get(rota).status_code == 200, rota

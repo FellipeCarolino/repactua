@@ -2926,6 +2926,9 @@ def admin():
     conv_pct = round(pagantes * 100 / len(orgs)) if orgs else 0
     agora = datetime.utcnow()
     v_hoje = Visita.query.filter(Visita.quando >= agora.replace(hour=0, minute=0, second=0)).count()
+    # contagens de visitas antes do card do funil (que usa v_30d)
+    v_7d = Visita.query.filter(Visita.quando >= agora - timedelta(days=7)).count()
+    v_30d = Visita.query.filter(Visita.quando >= agora - timedelta(days=30)).count()
 
     # Funil de conversão (últimos 30 dias)
     def _ev30(nome):
@@ -2961,8 +2964,6 @@ def admin():
         <div style="font-size:1.4rem;font-weight:800;color:#1e7e34">{f_assin}</div>
         <div style="font-size:.72rem;color:#8a97a5">{_pct(f_assin, f_conf)} dos confirmados</div></div>
     </div>"""
-    v_7d = Visita.query.filter(Visita.quando >= agora - timedelta(days=7)).count()
-    v_30d = Visita.query.filter(Visita.quando >= agora - timedelta(days=30)).count()
     top = db.session.query(Visita.origem, db.func.count(Visita.id)).filter(
         Visita.quando >= agora - timedelta(days=30)).group_by(Visita.origem).order_by(
         db.func.count(Visita.id).desc()).first()
