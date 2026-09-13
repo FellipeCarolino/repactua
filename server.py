@@ -58,6 +58,7 @@ IA_TENTATIVAS = 3       # re-tentativas em erros transitórios (sobrecarga/conex
 
 LIMITE_POR_STATUS = {"ativo": 50, "trial": 3, "inativo": 0}
 TRIAL_DIAS = 7  # duração do teste gratuito (dias corridos a partir do cadastro)
+SENHA_MIN = 8   # tamanho mínimo de senha (cadastro, troca, redefinição e membros)
 BASE_URL = os.environ.get("BASE_URL", "https://repactua.com.br").rstrip("/")
 # Domínios de e-mail descartável/temporário — bloqueados no cadastro (contas legítimas apenas)
 DOMINIOS_DESCARTAVEIS = {
@@ -235,6 +236,9 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
     "pool_recycle": 300,
 }
+# Limite de upload no servidor (o navegador já barra >20 MB; sem isso, um envio gigante direto
+# iria inteiro para a memória e poderia derrubar um worker).
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
@@ -307,12 +311,21 @@ class User(UserMixin, db.Model):
     aviso_trial = db.Column(db.Boolean, default=False)  # e-mail de fim do teste já enviado
     email_confirmado = db.Column(db.Boolean, default=False)  # double opt-in: só entra após confirmar o e-mail
     confirm_token = db.Column(db.String(80))            # token do link de confirmação de e-mail
+    sessao_versao = db.Column(db.Integer, default=0)    # sobe ao trocar/redefinir a senha → derruba as outras sessões
 
     def set_senha(self, senha):
         self.senha_hash = generate_password_hash(senha, method="pbkdf2:sha256")
 
     def conferir_senha(self, senha):
         return check_password_hash(self.senha_hash, senha)
+
+    def get_id(self):
+        # id + versão da sessão (Flask-Login grava isso no cookie de sessão e no "lembrar de mim")
+        return f"{self.id}:{self.sessao_versao or 0}"
+
+    def encerrar_outras_sessoes(self):
+        """Invalida todas as sessões/cookies existentes deste usuário (ex.: ao trocar a senha)."""
+        self.sessao_versao = (self.sessao_versao or 0) + 1
 
     @property
     def status_efetivo(self):
@@ -412,7 +425,17 @@ class Caso(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    # Formato "id:versão". Sessões antigas guardavam só o id e valem como versão 0,
+    # então ninguém é deslogado no deploy; após trocar a senha a versão sobe e as outras caem.
+    uid, _, versao = str(user_id).partition(":")
+    try:
+        u = db.session.get(User, int(uid))
+        versao = int(versao or 0)
+    except (ValueError, TypeError):
+        return None
+    if not u or versao != (u.sessao_versao or 0):
+        return None
+    return u
 
 
 def _migrar_schema():
@@ -437,6 +460,7 @@ def _migrar_schema():
         'ALTER TABLE escritorio ADD COLUMN aviso_fim BOOLEAN',
         'ALTER TABLE "user" ADD COLUMN email_confirmado BOOLEAN',
         'ALTER TABLE "user" ADD COLUMN confirm_token VARCHAR(80)',
+        'ALTER TABLE "user" ADD COLUMN sessao_versao INTEGER',
         # contas que já existiam antes da confirmação por e-mail ficam confirmadas (não travar ninguém)
         'UPDATE "user" SET email_confirmado = TRUE WHERE email_confirmado IS NULL',
         # índices p/ consultas frequentes (idempotentes)
@@ -943,12 +967,13 @@ def redefinir_senha():
     if request.method == "POST":
         senha = request.form.get("senha") or ""
         confirma = request.form.get("confirma") or ""
-        if len(senha) < 6:
-            msg = '<div class="erro">A senha deve ter no mínimo 6 caracteres.</div>'
+        if len(senha) < SENHA_MIN:
+            msg = '<div class="erro">A senha deve ter no mínimo 8 caracteres.</div>'
         elif senha != confirma:
             msg = '<div class="erro">As senhas não conferem.</div>'
         else:
             user.set_senha(senha)
+            user.encerrar_outras_sessoes()  # quem estava logado com a senha antiga cai
             user.reset_token = None
             user.reset_expira = None
             db.session.commit()
@@ -956,14 +981,14 @@ def redefinir_senha():
             return redirect(url_for("index"))
         corpo = f"""<h2>Criar nova senha</h2><div class="sub">Conta: {user.email}</div>{msg}
         <form method="post"><input type="hidden" name="t" value="{token}">
-          <label>Nova senha</label><input type="password" name="senha" required placeholder="mínimo 6 caracteres">
+          <label>Nova senha</label><input type="password" name="senha" required placeholder="mínimo 8 caracteres">
           <label>Confirmar senha</label><input type="password" name="confirma" required placeholder="repita a senha">
           <button class="btn" type="submit">Salvar nova senha</button>
         </form>"""
         return _pagina_auth("Redefinir senha", corpo)
     corpo = f"""<h2>Criar nova senha</h2><div class="sub">Conta: {user.email}</div>
     <form method="post"><input type="hidden" name="t" value="{token}">
-      <label>Nova senha</label><input type="password" name="senha" required placeholder="mínimo 6 caracteres">
+      <label>Nova senha</label><input type="password" name="senha" required placeholder="mínimo 8 caracteres">
       <label>Confirmar senha</label><input type="password" name="confirma" required placeholder="repita a senha">
       <button class="btn" type="submit">Salvar nova senha</button>
     </form>"""
@@ -1072,8 +1097,8 @@ def pagina_signup():
             msg = '<div class="erro">Informe um e-mail válido.</div>'
         elif _dominio_descartavel(email):
             msg = '<div class="erro">Não aceitamos e-mails temporários/descartáveis. Use um e-mail permanente (preferencialmente o do escritório).</div>'
-        elif len(senha) < 6:
-            msg = '<div class="erro">A senha deve ter no mínimo 6 caracteres.</div>'
+        elif len(senha) < SENHA_MIN:
+            msg = '<div class="erro">A senha deve ter no mínimo 8 caracteres.</div>'
         elif not _documento_valido(documento):
             msg = '<div class="erro">Informe um CPF ou CNPJ válido (apenas números ou com pontuação).</div>'
         elif User.query.filter_by(email=email).first():
@@ -1123,7 +1148,7 @@ def pagina_signup():
       <label>Escritório (opcional)</label><input name="escritorio" placeholder="Nome do escritório">
       <label>CPF ou CNPJ</label><input name="documento" required inputmode="text" placeholder="000.000.000-00 ou 00.000.000/0000-00">
       <label>E-mail</label><input type="email" name="email" required placeholder="voce@escritorio.adv.br">
-      <label>Senha</label><input type="password" name="senha" required placeholder="mínimo 6 caracteres">
+      <label>Senha</label><input type="password" name="senha" required placeholder="mínimo 8 caracteres">
       <label style="display:flex;align-items:flex-start;gap:8px;text-transform:none;letter-spacing:0;font-weight:400;font-size:.82rem;margin-top:14px;color:#2b3a4a">
         <input type="checkbox" name="aceite" required style="width:17px;height:17px;margin-top:2px;flex:none">
         <span>Li e aceito os <a href="/termos" target="_blank">Termos de Uso</a> e a <a href="/privacidade" target="_blank">Política de Privacidade</a>.</span>
@@ -1313,7 +1338,7 @@ def pagina_privacidade():
 </ul>
 
 <h2>7. Seus direitos (art. 18 da LGPD)</h2>
-<p>O titular pode solicitar confirmação de tratamento, acesso, correção, anonimização, portabilidade, eliminação, informação sobre compartilhamentos e revogação de consentimento. Pedidos relativos a dados de clientes de assinantes serão direcionados ao advogado controlador, salvo determinação legal em contrário.</p>
+<p>O titular pode solicitar confirmação de tratamento, acesso, correção, anonimização, portabilidade, eliminação, informação sobre compartilhamentos e revogação de consentimento. O próprio assinante pode, a qualquer momento, <b>exportar seus dados</b> e <b>excluir a conta</b> em <b>Minha conta → Seus dados</b>. Pedidos relativos a dados de clientes de assinantes serão direcionados ao advogado controlador, salvo determinação legal em contrário.</p>
 
 <h2>8. Encarregado (DPO) e contato</h2>
 <p>Encarregado pelo tratamento de dados: Fellipe Carolino — <a href="mailto:fellipe@sorvezenetechnology.com.br">fellipe@sorvezenetechnology.com.br</a>.</p>
@@ -1380,6 +1405,15 @@ def _html_sem_cache(resp):
     if _EM_PRODUCAO:
         resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return resp
+
+
+@app.errorhandler(413)
+def _arquivo_grande(e):
+    msg = ("Arquivo muito grande. Envie um PDF ou foto de até 20 MB — se for um PDF longo, "
+           "envie apenas as páginas principais.")
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "erro": msg}), 413
+    return Response(msg, status=413, mimetype="text/plain; charset=utf-8")
 
 
 # --- Monitoramento de erros: loga o traceback e avisa o admin por e-mail (com trava anti-tempestade) ---
@@ -2189,7 +2223,7 @@ def render_conta(msg_ok="", msg_erro=""):
               <div class="grid">
                 <div><label>Nome</label><input type="text" name="nome" placeholder="Nome do membro"></div>
                 <div><label>E-mail (login)</label><input type="email" name="email" required placeholder="colega@escritorio.adv.br"></div>
-                <div><label>Senha inicial</label><input type="text" name="senha" required placeholder="mínimo 6 caracteres"></div>
+                <div><label>Senha inicial</label><input type="text" name="senha" required placeholder="mínimo 8 caracteres"></div>
                 <div><label>Cota de consultas/mês</label><input type="number" name="cota" value="0" min="0" max="{org.cota_disponivel}"></div>
               </div>
               <div style="margin-top:12px"><button class="btn">Criar membro</button></div>
@@ -2213,9 +2247,33 @@ def render_conta(msg_ok="", msg_erro=""):
     bloco_senha = """<div class="card">
       <h2>Segurança</h2>
       <form method="post" action="/conta/senha" class="grid">
-        <div><label>Nova senha</label><input type="password" name="senha" required placeholder="mínimo 6 caracteres"></div>
+        <div><label>Nova senha</label><input type="password" name="senha" required placeholder="mínimo 8 caracteres"></div>
         <div style="display:flex;align-items:flex-end"><button class="btn">Trocar senha</button></div>
       </form>
+    </div>"""
+
+    if u.is_admin:
+        form_excluir = '<div class="muted" style="margin-top:12px">Contas de administrador não podem ser excluídas por aqui.</div>'
+    else:
+        aviso_exclusao = ("<b>Atenção:</b> você é o dono do escritório — excluir apaga o escritório inteiro: "
+                          "todos os membros, todos os casos salvos, e cancela a assinatura."
+                          if (u.papel or "dono") == "dono" else
+                          "Excluir remove apenas o seu login; os casos que você salvou continuam no escritório.")
+        form_excluir = f"""<details style="margin-top:16px">
+          <summary style="cursor:pointer;color:#a3271a;font-weight:700;font-size:.88rem">Excluir minha conta</summary>
+          <div class="erro" style="margin-top:10px">{aviso_exclusao} Esta ação não pode ser desfeita.</div>
+          <form method="post" action="/conta/excluir" class="grid"
+                onsubmit="return confirm('Excluir definitivamente sua conta no Repactua?')">
+            <div><label>Sua senha</label><input type="password" name="senha" required autocomplete="current-password"></div>
+            <div><label>Digite EXCLUIR para confirmar</label><input type="text" name="confirmacao" required autocomplete="off"></div>
+            <div><button class="btn" style="background:#a3271a;box-shadow:none">Excluir definitivamente</button></div>
+          </form>
+        </details>"""
+    bloco_dados = f"""<div class="card">
+      <h2>Seus dados (LGPD)</h2>
+      <div class="row"><span>Baixe uma cópia dos seus dados e dos casos salvos (arquivo JSON).</span>
+        <a class="btn" href="/conta/exportar" style="text-decoration:none;white-space:nowrap">⬇ Exportar meus dados</a></div>
+      {form_excluir}
     </div>"""
 
     primeiro_nome = ((u.nome or "").strip().split(" ") or [""])[0]
@@ -2237,7 +2295,7 @@ def render_conta(msg_ok="", msg_erro=""):
           <span class="tag">Seu painel Repactua</span>
         </div>
       </div>
-      {avisos}{bloco_plano}{bloco_equipe}{bloco_senha}
+      {avisos}{bloco_plano}{bloco_equipe}{bloco_senha}{bloco_dados}
     </div>"""
     return Response(PAGINA_CONTA.replace("{{CORPO}}", corpo), mimetype="text/html")
 
@@ -2252,11 +2310,14 @@ def conta():
 @login_required
 def conta_senha():
     senha = request.form.get("senha") or ""
-    if len(senha) < 6:
-        return render_conta(msg_erro="A senha deve ter no mínimo 6 caracteres.")
-    current_user.set_senha(senha)
+    if len(senha) < SENHA_MIN:
+        return render_conta(msg_erro="A senha deve ter no mínimo 8 caracteres.")
+    u = current_user._get_current_object()
+    u.set_senha(senha)
+    u.encerrar_outras_sessoes()
     db.session.commit()
-    return render_conta(msg_ok="Senha alterada com sucesso.")
+    login_user(u, remember=True)  # mantém ESTE aparelho conectado, já com a nova versão de sessão
+    return render_conta(msg_ok="Senha alterada. Por segurança, os outros aparelhos conectados foram desconectados.")
 
 
 def _exige_dono_escritorio():
@@ -2264,6 +2325,81 @@ def _exige_dono_escritorio():
     if current_user.papel != "dono" or not org or org.plano != "escritorio":
         return None
     return org
+
+
+@app.route("/conta/exportar")
+@login_required
+def conta_exportar():
+    """LGPD (art. 18): o titular baixa uma cópia dos próprios dados e dos casos que controla."""
+    u = current_user._get_current_object()
+    org = u.org
+    eh_dono = (u.papel or "dono") == "dono"
+
+    def dt(v):
+        return v.isoformat() if v else None
+    q = Caso.query.filter_by(org_id=org.id) if (org and eh_dono) else Caso.query.filter_by(user_id=u.id)
+    casos = []
+    for c in q.order_by(Caso.criado_em).all():
+        try:
+            conteudo = json.loads(c.payload or "{}")
+        except ValueError:
+            conteudo = c.payload
+        casos.append({"id": c.id, "nome": c.nome, "criado_em": dt(c.criado_em),
+                      "atualizado_em": dt(c.atualizado_em), "conteudo": conteudo})
+    escritorio = None
+    if org:
+        escritorio = {"nome": org.nome, "plano": org.plano, "status": u.status_efetivo}
+        if eh_dono:
+            escritorio.update({"documento": org.documento, "telefone": org.telefone,
+                               "cidade": org.cidade, "uf": org.uf,
+                               "acesso_ate": dt(org.acesso_ate), "criado_em": dt(org.criado_em)})
+    dados = {
+        "gerado_em": datetime.utcnow().isoformat() + "Z",
+        "titular": {"nome": u.nome, "email": u.email, "oab": u.oab, "papel": u.papel or "dono",
+                    "escritorio_informado": u.escritorio, "criado_em": dt(u.criado_em)},
+        "escritorio": escritorio,
+        "uso_ia": {"mes": u.usage_mes, "consultas": u.usage_contagem, "cota_mensal": u.cota_mensal},
+        "casos": casos,
+    }
+    nome = "repactua-meus-dados-" + date.today().isoformat() + ".json"
+    return Response(json.dumps(dados, ensure_ascii=False, indent=2),
+                    mimetype="application/json; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename={nome}"})
+
+
+@app.route("/conta/excluir", methods=["POST"])
+@login_required
+def conta_excluir():
+    """LGPD (art. 18): o próprio titular exclui a conta, com senha + confirmação digitada."""
+    u = current_user._get_current_object()
+    if u.is_admin or u.email == ADMIN_EMAIL:
+        return render_conta(msg_erro="Contas de administrador não podem ser excluídas por aqui.")
+    if _limitado("excluir:" + str(u.id), maximo=5):
+        return render_conta(msg_erro="Muitas tentativas. Aguarde alguns minutos e tente de novo.")
+    if (request.form.get("confirmacao") or "").strip().upper() != "EXCLUIR":
+        return render_conta(msg_erro="Para confirmar a exclusão, digite EXCLUIR no campo indicado.")
+    if not u.conferir_senha(request.form.get("senha") or ""):
+        return render_conta(msg_erro="Senha incorreta — a conta não foi excluída.")
+    email, nome, era_dono = u.email, u.nome, (u.papel or "dono") == "dono"
+    _excluir_conta(u)
+    logout_user()
+    db.session.add(LogAdmin(admin_email="próprio usuário", acao="excluiu a própria conta", alvo=email))
+    db.session.commit()
+    _enviar_email("🗑 Repactua: conta excluída pelo usuário",
+                  f"{nome or email} <{email}> excluiu a própria conta"
+                  f"{' (dono — escritório, membros e casos)' if era_dono else ' (login de membro)'}.")
+    _enviar_email(
+        "Sua conta no Repactua foi excluída",
+        f"Olá{', ' + nome if nome else ''}!\n\n"
+        "Conforme solicitado, sua conta no Repactua foi excluída"
+        f"{', junto com o escritório, os membros e os casos salvos' if era_dono else ''}. "
+        "Se havia assinatura ativa, a cobrança recorrente foi cancelada.\n\n"
+        "Se não foi você quem pediu a exclusão, responda este e-mail imediatamente.\n\n"
+        "Equipe Repactua · repactua.com.br",
+        para=email)
+    return _pagina_auth("Conta excluída", """<h2>Conta excluída</h2>
+    <div class="sub">Seus dados foram removidos do Repactua. Enviamos uma confirmação para o seu e-mail.</div>
+    <div class="link"><a href="/">Voltar ao site</a></div>""")
 
 
 @app.route("/conta/membro", methods=["POST"])
@@ -2285,8 +2421,8 @@ def conta_membro_add():
         return render_conta(msg_erro="Informe um e-mail válido para o membro.")
     if _dominio_descartavel(email):
         return render_conta(msg_erro="Não aceitamos e-mails temporários/descartáveis para membros.")
-    if len(senha) < 6:
-        return render_conta(msg_erro="A senha do membro deve ter no mínimo 6 caracteres.")
+    if len(senha) < SENHA_MIN:
+        return render_conta(msg_erro="A senha do membro deve ter no mínimo 8 caracteres.")
     if User.query.filter_by(email=email).first():
         return render_conta(msg_erro="Já existe uma conta com este e-mail.")
     if cota > org.cota_disponivel:
@@ -3139,6 +3275,7 @@ def admin_resetsenha(uid):
         return redirect(url_for("admin_assinantes"))
     nova = secrets.token_hex(4)  # 8 caracteres
     u.set_senha(nova)
+    u.encerrar_outras_sessoes()  # a senha antiga deixa de valer em todos os aparelhos
     db.session.commit()
     _log_admin("gerou senha temporária", u.email)
     return redirect(f"/admin/org/{u.org_id}?senha={nova}" if u.org_id else url_for("admin_assinantes"))
@@ -3157,6 +3294,26 @@ def admin_entrar_como(uid):
     return redirect(url_for("index"))
 
 
+def _excluir_conta(u):
+    """Exclui um login (membro) ou a conta inteira (dono: escritório + membros + casos).
+    Se o dono tiver assinatura no Asaas, cancela antes — senão o cliente seguiria sendo cobrado."""
+    org = u.org
+    if (u.papel or "dono") == "dono" and org:
+        if org.asaas_subscription_id:
+            try:
+                asaas("DELETE", "/subscriptions/%s" % org.asaas_subscription_id)
+            except Exception:
+                pass  # já cancelada/removida no Asaas
+        Caso.query.filter_by(org_id=org.id).delete()
+        for m in list(org.usuarios or []):
+            db.session.delete(m)
+        db.session.delete(org)
+    else:
+        Caso.query.filter_by(user_id=u.id).update({"user_id": None})  # casos ficam com o escritório
+        db.session.delete(u)
+    db.session.commit()
+
+
 @app.route("/admin/excluir/<int:uid>", methods=["POST"])
 def admin_excluir(uid):
     """Exclui um login (membro) ou a conta inteira (dono: escritório+membros+casos)."""
@@ -3165,17 +3322,9 @@ def admin_excluir(uid):
     u = db.session.get(User, uid)
     if not u or u.email == ADMIN_EMAIL or u.email == session.get("admin_email"):
         return redirect(url_for("admin_assinantes"))
-    org = u.org
-    if (u.papel or "dono") == "dono" and org:
-        Caso.query.filter_by(org_id=org.id).delete()
-        for m in list(org.usuarios or []):
-            db.session.delete(m)
-        db.session.delete(org)
-    else:
-        Caso.query.filter_by(user_id=u.id).update({"user_id": None})
-        db.session.delete(u)
-    db.session.commit()
-    _log_admin("excluiu conta/login", u.email)
+    email = u.email
+    _excluir_conta(u)
+    _log_admin("excluiu conta/login", email)
     return redirect(url_for("admin_assinantes"))
 
 

@@ -157,3 +157,99 @@ def test_webhook_atraso_so_da_assinatura_vigente():
     assert _estado(oid)[0] == "ativo"
     _hook("PAYMENT_OVERDUE", cus, "pay_" + uuid.uuid4().hex[:10], sub)
     assert _estado(oid)[0] == "inativo"
+
+
+# ---------- Minha conta: senha, sessões, LGPD e upload ----------
+import io  # noqa: E402
+
+SENHA_OK = "senhaforte1"
+
+
+def _usuario_teste(admin=False):
+    suf = uuid.uuid4().hex[:10]
+    with server.app.app_context():
+        org = server.Escritorio(nome="C" + suf, plano="individual", status="ativo")
+        server.db.session.add(org)
+        server.db.session.flush()
+        u = server.User(email=f"u{suf}@example.com", nome="Teste", org_id=org.id, papel="dono",
+                        is_admin=admin, email_confirmado=True)
+        u.set_senha(SENHA_OK)
+        server.db.session.add(u)
+        server.db.session.flush()
+        server.db.session.add(server.Caso(org_id=org.id, user_id=u.id, nome="Caso " + suf,
+                                          payload='{"dados": {"nome": "Cliente"}}'))
+        server.db.session.commit()
+        return u.id, u.email, org.id
+
+
+def _logado(uid):
+    """Cliente de teste já autenticado (sem passar pelo /login e seu rate-limit)."""
+    c = _client()
+    with server.app.app_context():
+        gid = server.db.session.get(server.User, uid).get_id()
+    with c.session_transaction() as s:
+        s["_user_id"] = gid
+        s["_fresh"] = True
+    return c
+
+
+def _senha_confere(uid, senha):
+    with server.app.app_context():
+        return server.db.session.get(server.User, uid).conferir_senha(senha)
+
+
+def test_senha_minima_8():
+    uid, _, _ = _usuario_teste()
+    r = _logado(uid).post("/conta/senha", data={"senha": "curta12"})  # 7 caracteres
+    assert "mínimo 8" in r.get_data(as_text=True)
+    assert _senha_confere(uid, SENHA_OK)  # não trocou
+
+
+def test_trocar_senha_derruba_outras_sessoes():
+    uid, _, _ = _usuario_teste()
+    aqui, outro_aparelho = _logado(uid), _logado(uid)
+    assert aqui.post("/conta/senha", data={"senha": "novasenha99"}).status_code == 200
+    assert outro_aparelho.get("/conta").status_code == 302  # caiu → vai pro login
+    assert aqui.get("/conta").status_code == 200             # quem trocou continua logado
+    assert _senha_confere(uid, "novasenha99")
+
+
+def test_exportar_meus_dados():
+    uid, email, _ = _usuario_teste()
+    r = _logado(uid).get("/conta/exportar")
+    assert r.status_code == 200
+    assert "attachment" in r.headers.get("Content-Disposition", "")
+    dados = r.get_json(force=True)
+    assert dados["titular"]["email"] == email
+    assert len(dados["casos"]) == 1
+
+
+def test_excluir_minha_conta():
+    uid, _, oid = _usuario_teste()
+    c = _logado(uid)
+    c.post("/conta/excluir", data={"senha": SENHA_OK, "confirmacao": "nao"})  # sem confirmar
+    c.post("/conta/excluir", data={"senha": "errada", "confirmacao": "EXCLUIR"})  # senha errada
+    with server.app.app_context():
+        assert server.db.session.get(server.User, uid) is not None
+    r = c.post("/conta/excluir", data={"senha": SENHA_OK, "confirmacao": "EXCLUIR"})
+    assert "Conta excluída" in r.get_data(as_text=True)
+    with server.app.app_context():
+        assert server.db.session.get(server.User, uid) is None
+        assert server.db.session.get(server.Escritorio, oid) is None
+        assert server.Caso.query.filter_by(org_id=oid).count() == 0
+
+
+def test_admin_nao_se_exclui_pela_conta():
+    uid, _, _ = _usuario_teste(admin=True)
+    _logado(uid).post("/conta/excluir", data={"senha": SENHA_OK, "confirmacao": "EXCLUIR"})
+    with server.app.app_context():
+        assert server.db.session.get(server.User, uid) is not None
+
+
+def test_upload_acima_do_limite_da_413_amigavel():
+    uid, _, _ = _usuario_teste()
+    grande = io.BytesIO(b"0" * (26 * 1024 * 1024))
+    r = _logado(uid).post("/api/extract-holerite", data={"file": (grande, "grande.pdf")},
+                          content_type="multipart/form-data")
+    assert r.status_code == 413
+    assert "muito grande" in r.get_json()["erro"]
