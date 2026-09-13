@@ -59,6 +59,7 @@ IA_TENTATIVAS = 3       # re-tentativas em erros transitórios (sobrecarga/conex
 LIMITE_POR_STATUS = {"ativo": 50, "trial": 3, "inativo": 0}
 TRIAL_DIAS = 7  # duração do teste gratuito (dias corridos a partir do cadastro)
 SENHA_MIN = 8   # tamanho mínimo de senha (cadastro, troca, redefinição e membros)
+CARENCIA_DIAS = 5  # após a mensalidade vencer, o acesso segue por pelo menos N dias antes de suspender
 BASE_URL = os.environ.get("BASE_URL", "https://repactua.com.br").rstrip("/")
 # Domínios de e-mail descartável/temporário — bloqueados no cadastro (contas legítimas apenas)
 DOMINIOS_DESCARTAVEIS = {
@@ -264,6 +265,8 @@ class Escritorio(db.Model):
     timbre = db.Column(db.Text)  # JSON do timbre da petição (compartilhado pelo escritório)
     documento = db.Column(db.String(20))  # CPF ou CNPJ (só dígitos) informado no cadastro
     aviso_fim = db.Column(db.Boolean, default=False)  # e-mail "seu teste está acabando" já enviado
+    pagamento_pendente = db.Column(db.Boolean, default=False)  # mensalidade vencida (em carência ou suspensa)
+    fatura_url = db.Column(db.String(300))  # link da fatura em aberto no Asaas (p/ o cliente pagar direto)
     telefone = db.Column(db.String(30))
     cidade = db.Column(db.String(120))
     uf = db.Column(db.String(4))
@@ -458,6 +461,8 @@ def _migrar_schema():
         'ALTER TABLE escritorio ADD COLUMN acesso_ate DATE',
         'ALTER TABLE escritorio ADD COLUMN documento VARCHAR(20)',
         'ALTER TABLE escritorio ADD COLUMN aviso_fim BOOLEAN',
+        'ALTER TABLE escritorio ADD COLUMN pagamento_pendente BOOLEAN',
+        'ALTER TABLE escritorio ADD COLUMN fatura_url VARCHAR(300)',
         'ALTER TABLE "user" ADD COLUMN email_confirmado BOOLEAN',
         'ALTER TABLE "user" ADD COLUMN confirm_token VARCHAR(80)',
         'ALTER TABLE "user" ADD COLUMN sessao_versao INTEGER',
@@ -1252,6 +1257,7 @@ def pagina_termos():
 <li><b>Plano Escritório:</b> R$ 229,90/mês — até 5 acessos e um total de 250 consultas de IA por mês, distribuíveis entre os membros.</li>
 <li>“Consulta de IA” é cada leitura de documento (holerite, contrato etc.) processada por inteligência artificial. As consultas renovam mensalmente e não se acumulam.</li>
 <li>A cobrança é recorrente mensal, processada pela plataforma Asaas (Pix, boleto ou cartão). Os preços podem ser reajustados com aviso prévio de pelo menos 30 dias.</li>
+<li>Em caso de atraso no pagamento, o acesso é mantido por uma carência de 5 (cinco) dias após o vencimento, e o assinante é avisado por e-mail. Persistindo a pendência, o acesso é suspenso até a regularização — os casos salvos são preservados.</li>
 <li>Emitimos nota fiscal de serviço para os pagamentos realizados.</li>
 </ul>
 
@@ -1523,9 +1529,21 @@ def render_home():
                        '<div class="a-ico">👥</div><div class="a-nome">Equipe</div>'
                        '<div class="a-sub">Membros e créditos</div></a>')
     alerta = ""
+    fatura = (org.fatura_url.replace('"', "") if (org and org.fatura_url
+              and org.fatura_url.startswith("https://")) else None)
+    alvo_fatura = f'href="{fatura}" target="_blank" rel="noopener"' if fatura else 'href="/conta"'
     if u.status_efetivo != "ativo":
-        alerta = ('<a class="alerta" href="/assinar">⚠️ Sua conta não está ativa. '
-                  'Clique para assinar e liberar as consultas →</a>')
+        if org and org.pagamento_pendente:
+            # suspensa por falta de pagamento: pagar a fatura em aberto reativa (não criar outra assinatura)
+            alerta = (f'<a class="alerta" {alvo_fatura}>⚠️ Seu acesso está suspenso por falta de pagamento. '
+                      'Clique para pagar a fatura em aberto e reativar →</a>')
+        else:
+            alerta = ('<a class="alerta" href="/assinar">⚠️ Sua conta não está ativa. '
+                      'Clique para assinar e liberar as consultas →</a>')
+    elif org and org.pagamento_pendente:
+        prazo = org.acesso_ate.strftime("%d/%m") if org.acesso_ate else "os próximos dias"
+        alerta = (f'<a class="alerta" {alvo_fatura}>⚠️ Pagamento pendente: regularize até {prazo} '
+                  'para não perder o acesso →</a>')
 
     corpo = f"""<header class="hero-head"><div class="inner">
       <div class="brand">{logo_repactua(30)} <div>Repactua<small>Análise de superendividamento</small></div></div>
@@ -2615,6 +2633,8 @@ def asaas_webhook():
         primeira_ativacao = org.status != "ativo"
         org.status = "ativo"
         org.acesso_ate = date.today() + timedelta(days=37)  # 1 mês + folga
+        org.pagamento_pendente = False  # pagou (dentro ou depois da carência): some o aviso
+        org.fatura_url = None
         if cust_id and not org.asaas_customer_id:
             org.asaas_customer_id = cust_id
         emails.append(("💰 Repactua: pagamento recebido",
@@ -2630,15 +2650,53 @@ def asaas_webhook():
                 "A nota fiscal será emitida automaticamente e enviada pelo nosso parceiro de pagamentos.\n\n"
                 "Bom trabalho!\nEquipe Repactua · repactua.com.br",
                 dono.email))
-    elif tipo in ("PAYMENT_OVERDUE", "PAYMENT_REFUNDED"):
-        # Atraso só bloqueia se for cobrança da assinatura vigente; estorno bloqueia (exceto cortesia).
-        if cortesia or (tipo == "PAYMENT_OVERDUE" and not da_assinatura_atual):
+    elif tipo == "PAYMENT_OVERDUE":
+        # Atraso só conta se for cobrança da assinatura vigente; cortesia e conta em teste não são afetadas.
+        if cortesia or not da_assinatura_atual or org.status == "trial":
             return jsonify({"ok": True, "ignorado": "fora da assinatura vigente"})
         if pay_id:
             db.session.add(WebhookEvento(chave=f"{tipo}:{pay_id}"))
+        hoje = date.today()
+        fatura = pagamento.get("invoiceUrl") or ""
+        org.fatura_url = fatura[:300] if fatura.startswith("https://") else None
+        org.pagamento_pendente = True
+        if org.status == "ativo" and (org.acesso_ate is None or org.acesso_ate >= hoje):
+            # Carência: o acesso segue por CARENCIA_DIAS após o vencimento — nunca encurta o que já foi pago.
+            # (Quem já estava sem acesso cai no else: não ganha carência nova a cada mês sem pagar.)
+            fim = hoje + timedelta(days=CARENCIA_DIAS)
+            if org.acesso_ate and org.acesso_ate > fim:
+                fim = org.acesso_ate
+            org.acesso_ate = fim
+            prazo = fim.strftime("%d/%m/%Y")
+            emails.append(("⏳ Repactua: pagamento em atraso (carência)",
+                           f"Cobrança vencida de {org.nome or email or cust_id} — acesso mantido até {prazo}.",
+                           None))
+            dono = next((u for u in (org.usuarios or []) if u.papel == "dono"), None)
+            if dono:
+                valor = pagamento.get("value")
+                emails.append((
+                    f"Pagamento pendente — seu acesso ao Repactua segue até {prazo}",
+                    f"Olá{', ' + dono.nome if dono.nome else ''}!\n\n"
+                    f"Não identificamos o pagamento da sua assinatura do Repactua"
+                    f"{' (R$ ' + str(valor) + ')' if valor else ''}. Para você não ficar sem acesso no meio "
+                    f"de um caso, sua conta segue ativa até {prazo}.\n\n"
+                    f"Para regularizar: {org.fatura_url or 'https://repactua.com.br/conta'}\n\n"
+                    "Se você já pagou, desconsidere este aviso — a confirmação de boleto pode levar até "
+                    "1 dia útil.\n\nEquipe Repactua · repactua.com.br",
+                    dono.email))
+        else:
+            org.status = "inativo"
+            emails.append(("⚠️ Repactua: pagamento com problema",
+                           f"Cobrança vencida de {org.nome or email or cust_id} — conta sem acesso.", None))
+    elif tipo == "PAYMENT_REFUNDED":
+        # Estorno: o pagamento deixou de valer — bloqueia na hora (exceto cortesia).
+        if cortesia:
+            return jsonify({"ok": True, "ignorado": "cortesia"})
+        if pay_id:
+            db.session.add(WebhookEvento(chave=f"{tipo}:{pay_id}"))
         org.status = "inativo"
-        emails.append(("⚠️ Repactua: pagamento com problema",
-                       f"Evento {tipo} para {org.nome or email or cust_id} — conta inativada.", None))
+        emails.append(("⚠️ Repactua: pagamento estornado",
+                       f"Estorno para {org.nome or email or cust_id} — conta inativada.", None))
     else:
         # PAYMENT_DELETED / SUBSCRIPTION_DELETED etc.: excluir uma cobrança NÃO é inadimplência
         # (acontece ao cancelar a assinatura ou dar cortesia) — o acesso segue a data já paga.

@@ -151,12 +151,53 @@ def test_webhook_cortesia_blindada():
     assert _estado(oid) == ("ativo", None)  # continua vitalícia, sem data de expiração
 
 
+def _pendente(oid):
+    with server.app.app_context():
+        return bool(server.db.session.get(server.Escritorio, oid).pagamento_pendente)
+
+
 def test_webhook_atraso_so_da_assinatura_vigente():
     oid, cus, sub = _org_teste("ativo", acesso=date.today() + timedelta(days=20))
     _hook("PAYMENT_OVERDUE", cus, "pay_" + uuid.uuid4().hex[:10], "sub_de_outra_epoca")
-    assert _estado(oid)[0] == "ativo"
+    assert _estado(oid) == ("ativo", date.today() + timedelta(days=20))
+    assert not _pendente(oid)
+
+
+def test_webhook_atraso_da_carencia_de_5_dias():
+    oid, cus, sub = _org_teste("ativo", acesso=date.today() + timedelta(days=1))
     _hook("PAYMENT_OVERDUE", cus, "pay_" + uuid.uuid4().hex[:10], sub)
-    assert _estado(oid)[0] == "inativo"
+    assert _estado(oid) == ("ativo", date.today() + timedelta(days=server.CARENCIA_DIAS))
+    assert _pendente(oid)
+    _hook("PAYMENT_CONFIRMED", cus, "pay_" + uuid.uuid4().hex[:10], sub)  # pagou dentro da carência
+    assert _estado(oid) == ("ativo", date.today() + timedelta(days=37))
+    assert not _pendente(oid)
+
+
+def test_webhook_atraso_nunca_encurta_o_que_ja_foi_pago():
+    oid, cus, sub = _org_teste("ativo", acesso=date.today() + timedelta(days=20))
+    _hook("PAYMENT_OVERDUE", cus, "pay_" + uuid.uuid4().hex[:10], sub)
+    assert _estado(oid) == ("ativo", date.today() + timedelta(days=20))
+
+
+def test_webhook_atraso_sem_acesso_nao_ganha_carencia_nova():
+    oid, cus, sub = _org_teste("ativo", acesso=date.today() - timedelta(days=3))
+    _hook("PAYMENT_OVERDUE", cus, "pay_" + uuid.uuid4().hex[:10], sub)
+    assert _estado(oid) == ("inativo", date.today() - timedelta(days=3))
+
+
+def test_webhook_atraso_nao_derruba_conta_em_teste():
+    oid, cus, sub = _org_teste("trial", acesso=date.today() + timedelta(days=4))
+    _hook("PAYMENT_OVERDUE", cus, "pay_" + uuid.uuid4().hex[:10], sub)
+    assert _estado(oid) == ("trial", date.today() + timedelta(days=4))
+
+
+def test_carencia_vencida_bloqueia_acesso():
+    with server.app.app_context():
+        org = server.Escritorio(nome="X", plano="individual", status="ativo",
+                                acesso_ate=date.today() - timedelta(days=1))
+        u = server.User(email="carencia@example.com", senha_hash="x")
+        u.org = org
+        assert u.status_efetivo == "inativo"
 
 
 # ---------- Minha conta: senha, sessões, LGPD e upload ----------
@@ -253,3 +294,16 @@ def test_upload_acima_do_limite_da_413_amigavel():
                           content_type="multipart/form-data")
     assert r.status_code == 413
     assert "muito grande" in r.get_json()["erro"]
+
+
+def test_inicio_avisa_pagamento_pendente():
+    uid, _, oid = _usuario_teste()
+    with server.app.app_context():
+        org = server.db.session.get(server.Escritorio, oid)
+        org.pagamento_pendente = True
+        org.acesso_ate = date.today() + timedelta(days=3)
+        org.fatura_url = "https://www.asaas.com/i/teste123"
+        server.db.session.commit()
+    html = _logado(uid).get("/").get_data(as_text=True)
+    assert "Pagamento pendente" in html
+    assert "https://www.asaas.com/i/teste123" in html
