@@ -28,8 +28,12 @@ import re
 import secrets
 import smtplib
 import time
+import hmac
+import hashlib
+import struct
+import urllib.parse
 from email.mime.text import MIMEText
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from functools import wraps
 
 from flask import (
@@ -60,6 +64,13 @@ LIMITE_POR_STATUS = {"ativo": 50, "trial": 3, "inativo": 0}
 TRIAL_DIAS = 7  # duração do teste gratuito (dias corridos a partir do cadastro)
 SENHA_MIN = 8   # tamanho mínimo de senha (cadastro, troca, redefinição e membros)
 CARENCIA_DIAS = 5  # após a mensalidade vencer, o acesso segue por pelo menos N dias antes de suspender
+# Emergência (perdeu o celular do app autenticador): ADMIN_2FA_OFF=1 no Railway desliga o código do painel.
+ADMIN_2FA_DESLIGADO = os.environ.get("ADMIN_2FA_OFF") == "1"
+
+
+def _agora_utc():
+    """Agora em UTC, sem fuso — mesmo formato das datas gravadas no banco (substitui a função utcnow, deprecada)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 BASE_URL = os.environ.get("BASE_URL", "https://repactua.com.br").rstrip("/")
 # Domínios de e-mail descartável/temporário — bloqueados no cadastro (contas legítimas apenas)
 DOMINIOS_DESCARTAVEIS = {
@@ -271,7 +282,7 @@ class Escritorio(db.Model):
     cidade = db.Column(db.String(120))
     uf = db.Column(db.String(4))
     acesso_ate = db.Column(db.Date)  # validade do período pago/teste (NULL = sem expiração/cortesia)
-    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+    criado_em = db.Column(db.DateTime, default=_agora_utc)
 
     usuarios = db.relationship("User", backref="org", lazy=True,
                                foreign_keys="User.org_id")
@@ -305,7 +316,7 @@ class User(UserMixin, db.Model):
     usage_mes = db.Column(db.String(7))   # "AAAA-MM"
     usage_contagem = db.Column(db.Integer, default=0)
     asaas_customer_id = db.Column(db.String(120))  # legado — migrado para o Escritório
-    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
+    criado_em = db.Column(db.DateTime, default=_agora_utc)
     org_id = db.Column(db.Integer, db.ForeignKey("escritorio.id"), index=True)
     papel = db.Column(db.String(20), default="dono")  # dono | membro
     cota_mensal = db.Column(db.Integer, default=50)    # créditos atribuídos a este usuário
@@ -315,6 +326,8 @@ class User(UserMixin, db.Model):
     email_confirmado = db.Column(db.Boolean, default=False)  # double opt-in: só entra após confirmar o e-mail
     confirm_token = db.Column(db.String(80))            # token do link de confirmação de e-mail
     sessao_versao = db.Column(db.Integer, default=0)    # sobe ao trocar/redefinir a senha → derruba as outras sessões
+    totp_segredo = db.Column(db.String(64))             # segredo do app autenticador (admin com 2FA)
+    totp_ativo = db.Column(db.Boolean, default=False)   # verificação em duas etapas ligada
 
     def set_senha(self, senha):
         self.senha_hash = generate_password_hash(senha, method="pbkdf2:sha256")
@@ -349,7 +362,7 @@ class User(UserMixin, db.Model):
         return LIMITE_POR_STATUS.get(st, 0)  # trial=3, inativo=0
 
     def _mes_atual(self):
-        return datetime.utcnow().strftime("%Y-%m")
+        return _agora_utc().strftime("%Y-%m")
 
     def consultas_restantes(self):
         if self.usage_mes != self._mes_atual():
@@ -372,7 +385,7 @@ class LogAdmin(db.Model):
     """Auditoria das ações administrativas."""
     __tablename__ = "log_admin"
     id = db.Column(db.Integer, primary_key=True)
-    quando = db.Column(db.DateTime, default=datetime.utcnow)
+    quando = db.Column(db.DateTime, default=_agora_utc)
     admin_email = db.Column(db.String(255))
     acao = db.Column(db.String(255))
     alvo = db.Column(db.String(255))
@@ -392,7 +405,7 @@ class Visita(db.Model):
     """Visita à landing (analytics próprio, sem cookies e sem IP)."""
     __tablename__ = "visita"
     id = db.Column(db.Integer, primary_key=True)
-    quando = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    quando = db.Column(db.DateTime, default=_agora_utc, index=True)
     origem = db.Column(db.String(200))
 
 
@@ -400,7 +413,7 @@ class Evento(db.Model):
     """Eventos do funil de conversão (analytics próprio, sem dados pessoais)."""
     __tablename__ = "evento"
     id = db.Column(db.Integer, primary_key=True)
-    quando = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    quando = db.Column(db.DateTime, default=_agora_utc, index=True)
     nome = db.Column(db.String(60), index=True)  # signup_view | signup_ok | email_confirmado | assinatura_ativa
 
 
@@ -409,7 +422,7 @@ class WebhookEvento(db.Model):
     __tablename__ = "webhook_evento"
     id = db.Column(db.Integer, primary_key=True)
     chave = db.Column(db.String(160), unique=True, nullable=False, index=True)  # ex.: "pago:pay_123"
-    quando = db.Column(db.DateTime, default=datetime.utcnow)
+    quando = db.Column(db.DateTime, default=_agora_utc)
 
 
 class Caso(db.Model):
@@ -420,8 +433,8 @@ class Caso(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     nome = db.Column(db.String(255))
     payload = db.Column(db.Text)  # JSON: {"dados": {...}, "dividas": [...]}
-    criado_em = db.Column(db.DateTime, default=datetime.utcnow)
-    atualizado_em = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    criado_em = db.Column(db.DateTime, default=_agora_utc)
+    atualizado_em = db.Column(db.DateTime, default=_agora_utc, onupdate=_agora_utc)
 
     autor = db.relationship("User", foreign_keys=[user_id])
 
@@ -466,6 +479,8 @@ def _migrar_schema():
         'ALTER TABLE "user" ADD COLUMN email_confirmado BOOLEAN',
         'ALTER TABLE "user" ADD COLUMN confirm_token VARCHAR(80)',
         'ALTER TABLE "user" ADD COLUMN sessao_versao INTEGER',
+        'ALTER TABLE "user" ADD COLUMN totp_segredo VARCHAR(64)',
+        'ALTER TABLE "user" ADD COLUMN totp_ativo BOOLEAN',
         # contas que já existiam antes da confirmação por e-mail ficam confirmadas (não travar ninguém)
         'UPDATE "user" SET email_confirmado = TRUE WHERE email_confirmado IS NULL',
         # índices p/ consultas frequentes (idempotentes)
@@ -803,7 +818,7 @@ _TENTATIVAS = {}
 
 def _limitado(chave, maximo=8, janela_s=900):
     """True se a chave estourou o limite de tentativas na janela (15 min)."""
-    agora = datetime.utcnow().timestamp()
+    agora = _agora_utc().timestamp()
     fila = [t for t in _TENTATIVAS.get(chave, []) if agora - t < janela_s]
     if len(fila) >= maximo:
         _TENTATIVAS[chave] = fila
@@ -930,7 +945,7 @@ def esqueci_senha():
         if user and email_ativo():
             token = secrets.token_urlsafe(32)
             user.reset_token = token
-            user.reset_expira = datetime.utcnow() + timedelta(hours=1)
+            user.reset_expira = _agora_utc() + timedelta(hours=1)
             db.session.commit()
             link = f"https://repactua.com.br/redefinir-senha?t={token}"
             _enviar_email(
@@ -963,7 +978,7 @@ def redefinir_senha():
     """Define a nova senha a partir do token recebido por e-mail."""
     token = (request.values.get("t") or "").strip()
     user = User.query.filter_by(reset_token=token).first() if token else None
-    valido = bool(user and user.reset_expira and user.reset_expira > datetime.utcnow())
+    valido = bool(user and user.reset_expira and user.reset_expira > _agora_utc())
     if not valido:
         corpo = """<h2>Link inválido ou expirado</h2>
         <div class="sub">O link de redefinição não é válido ou passou de 1 hora.</div>
@@ -1438,7 +1453,7 @@ def _erro_nao_tratado(e):
     except Exception:
         pass
     tipo = type(e).__name__
-    agora = datetime.utcnow()
+    agora = _agora_utc()
     ultimo = _ULTIMO_ALERTA_ERRO.get(tipo)
     if not ultimo or (agora - ultimo).total_seconds() > _INTERVALO_ALERTA_S:
         _ULTIMO_ALERTA_ERRO[tipo] = agora
@@ -1477,13 +1492,13 @@ def render_home():
     org = u.org
     plano = org.plano if org else "individual"
     plano_nome = PLANOS.get(plano, {}).get("nome", "Individual")
-    usados = (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime("%Y-%m") else 0
+    usados = (u.usage_contagem or 0) if u.usage_mes == _agora_utc().strftime("%Y-%m") else 0
     cota = u.limite_mensal or 0
     restantes = u.consultas_restantes()
     pct = int(usados * 100 / cota) if cota else 0
     primeiro_nome = (u.nome or u.email or "").split(" ")[0].split("@")[0].capitalize()
     saudacao = _saudacao_hora()
-    hoje = datetime.utcnow().strftime("%d/%m/%Y")
+    hoje = _agora_utc().strftime("%d/%m/%Y")
 
     # casos do escritório
     qbase = Caso.query.filter_by(org_id=u.org_id) if u.org_id else Caso.query.filter_by(user_id=u.id)
@@ -1511,7 +1526,7 @@ def render_home():
     if recentes:
         itens = ""
         for c in recentes:
-            quando = (c.atualizado_em or c.criado_em or datetime.utcnow()).strftime("%d/%m/%Y")
+            quando = (c.atualizado_em or c.criado_em or _agora_utc()).strftime("%d/%m/%Y")
             autor = (c.autor.nome or c.autor.email) if c.autor else ""
             sub_autor = f' · {autor}' if (plano == "escritorio" and autor) else ""
             itens += (f'<a class="recente" href="/calculadora?caso={c.id}">'
@@ -1591,7 +1606,7 @@ def render_home():
 
 
 def _saudacao_hora():
-    h = (datetime.utcnow().hour - 3) % 24  # horário de Brasília aproximado
+    h = (_agora_utc().hour - 3) % 24  # horário de Brasília aproximado
     if h < 12:
         return "Bom dia"
     if h < 18:
@@ -1624,7 +1639,7 @@ def _caso_to_dict(c, completo=True):
     d = {
         "id": c.id,
         "nomeCaso": c.nome or "Caso sem nome",
-        "salvoEm": (c.atualizado_em or c.criado_em or datetime.utcnow()).isoformat(),
+        "salvoEm": (c.atualizado_em or c.criado_em or _agora_utc()).isoformat(),
         "autor": (c.autor.nome or c.autor.email) if c.autor else "",
     }
     try:
@@ -1674,7 +1689,7 @@ def casos_atualizar(cid):
     if body.get("nomeCaso"):
         c.nome = body["nomeCaso"].strip()[:255]
     c.payload = json.dumps({"dados": body.get("dados", {}), "dividas": body.get("dividas", [])})
-    c.atualizado_em = datetime.utcnow()
+    c.atualizado_em = _agora_utc()
     db.session.commit()
     return jsonify({"ok": True, "id": c.id})
 
@@ -1755,7 +1770,7 @@ def _regua_diaria():
     """Tarefas diárias sem cron: disparadas pelo ping do monitoramento no /api/health.
     Um marcador no LogAdmin garante execução no máximo 1x por dia."""
     try:
-        hoje = datetime.utcnow().date()
+        hoje = _agora_utc().date()
         marca = LogAdmin.query.filter_by(acao="régua diária").order_by(LogAdmin.quando.desc()).first()
         if marca and marca.quando and marca.quando.date() >= hoje:
             return
@@ -2194,7 +2209,7 @@ def render_conta(msg_ok="", msg_erro=""):
     org = u.org
     plano = org.plano if org else "individual"
     plano_nome = PLANOS.get(plano, {}).get("nome", "Individual")
-    usados = (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime("%Y-%m") else 0
+    usados = (u.usage_contagem or 0) if u.usage_mes == _agora_utc().strftime("%Y-%m") else 0
     cota = u.cota_mensal or 0
     pct = int(usados * 100 / cota) if cota else 0
     avisos = (f'<div class="ok">{msg_ok}</div>' if msg_ok else "") + \
@@ -2217,7 +2232,7 @@ def render_conta(msg_ok="", msg_erro=""):
     if u.papel == "dono" and plano == "escritorio" and org:
         linhas = ""
         for m in sorted(org.usuarios, key=lambda x: (x.papel != "dono", x.nome or x.email)):
-            m_usados = (m.usage_contagem or 0) if m.usage_mes == datetime.utcnow().strftime("%Y-%m") else 0
+            m_usados = (m.usage_contagem or 0) if m.usage_mes == _agora_utc().strftime("%Y-%m") else 0
             eh_dono = m.papel == "dono"
             acoes = ""
             if not eh_dono:
@@ -2372,7 +2387,7 @@ def conta_exportar():
                                "cidade": org.cidade, "uf": org.uf,
                                "acesso_ate": dt(org.acesso_ate), "criado_em": dt(org.criado_em)})
     dados = {
-        "gerado_em": datetime.utcnow().isoformat() + "Z",
+        "gerado_em": _agora_utc().isoformat() + "Z",
         "titular": {"nome": u.nome, "email": u.email, "oab": u.oab, "papel": u.papel or "dono",
                     "escritorio_informado": u.escritorio, "criado_em": dt(u.criado_em)},
         "escritorio": escritorio,
@@ -2723,14 +2738,17 @@ def _admin_logado():
     if session.get("admin_ok"):
         desde = session.get("admin_desde")
         try:
-            if desde and (datetime.utcnow() - datetime.fromisoformat(desde)) > timedelta(hours=ADMIN_SESSAO_HORAS):
+            if desde and (_agora_utc() - datetime.fromisoformat(desde)) > timedelta(hours=ADMIN_SESSAO_HORAS):
                 session.pop("admin_ok", None)
                 session.pop("admin_desde", None)
             else:
                 return True
         except (ValueError, TypeError):
             session.pop("admin_ok", None)
-    return current_user.is_authenticated and current_user.is_admin
+    # Admin logado pelo login comum só acessa o painel se NÃO tiver a verificação em duas etapas
+    # ativa; com ela ativa, o acesso exige o /admin/login + o código do app autenticador.
+    return (current_user.is_authenticated and current_user.is_admin
+            and not (getattr(current_user, "totp_ativo", False) and not ADMIN_2FA_DESLIGADO))
 
 
 def _admin_csrf():
@@ -2746,6 +2764,37 @@ def _admin_csrf_ok():
     return bool(tok) and secrets.compare_digest(tok, session.get("admin_csrf") or "")
 
 
+# ---- Verificação em duas etapas (TOTP, RFC 6238 — compatível com Google Authenticator/Authy) ----
+def _totp(segredo_b32, t=None, passo=30, digitos=6):
+    chave = base64.b32decode(segredo_b32.upper() + "=" * (-len(segredo_b32) % 8))
+    contador = int((time.time() if t is None else t) // passo)
+    h = hmac.new(chave, struct.pack(">Q", contador), hashlib.sha1).digest()
+    o = h[-1] & 0x0F
+    codigo = (struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % (10 ** digitos)
+    return str(codigo).zfill(digitos)
+
+
+def _totp_confere(segredo_b32, codigo):
+    """Aceita o código atual e o do intervalo anterior/seguinte (tolerância de relógio de ±30 s)."""
+    codigo = re.sub(r"\D", "", codigo or "")
+    if len(codigo) != 6 or not segredo_b32:
+        return False
+    agora = time.time()
+    try:
+        return any(hmac.compare_digest(_totp(segredo_b32, agora + d * 30), codigo) for d in (-1, 0, 1))
+    except (ValueError, TypeError):
+        return False
+
+
+def _qr_svg(texto):
+    """QR code em SVG inline, gerado no próprio servidor. Sem a biblioteca, a página mostra só a chave."""
+    try:
+        import segno
+        return segno.make(texto, error="m").svg_inline(scale=5, dark="#12293f", border=2)
+    except Exception:
+        return ""
+
+
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     erro = ""
@@ -2759,9 +2808,14 @@ def admin_login():
             return _pagina_auth("Admin", corpo_bloq)
         u = User.query.filter_by(email=email).first() if email else None
         if u and u.is_admin and u.conferir_senha(senha):
+            if u.totp_ativo and u.totp_segredo and not ADMIN_2FA_DESLIGADO:
+                # senha certa → falta o código do app autenticador
+                session["admin_2fa_uid"] = u.id
+                session["admin_2fa_desde"] = time.time()
+                return redirect(url_for("admin_login_2fa"))
             session["admin_ok"] = True
             session["admin_email"] = email
-            session["admin_desde"] = datetime.utcnow().isoformat()
+            session["admin_desde"] = _agora_utc().isoformat()
             session["admin_csrf"] = secrets.token_urlsafe(24)  # token das ações do painel
             return redirect(url_for("admin"))
         erro = '<div class="erro">Credenciais inválidas ou conta sem permissão de admin.</div>'
@@ -2774,6 +2828,125 @@ def admin_login():
     </form>
     <div class="link"><a href="/">← Ir para o site</a></div>"""
     return _pagina_auth("Admin", corpo)
+
+
+def _admin_iniciar_sessao(u):
+    """Abre a sessão do painel (após a senha e, se ativo, o código do app autenticador)."""
+    session.pop("admin_2fa_uid", None)
+    session.pop("admin_2fa_desde", None)
+    session["admin_ok"] = True
+    session["admin_email"] = u.email
+    session["admin_desde"] = _agora_utc().isoformat()
+    session["admin_csrf"] = secrets.token_urlsafe(24)
+
+
+@app.route("/admin/login/2fa", methods=["GET", "POST"])
+def admin_login_2fa():
+    uid = session.get("admin_2fa_uid")
+    if not uid or time.time() - (session.get("admin_2fa_desde") or 0) > 300:  # 5 min p/ digitar o código
+        session.pop("admin_2fa_uid", None)
+        session.pop("admin_2fa_desde", None)
+        return redirect(url_for("admin_login"))
+    u = db.session.get(User, uid)
+    if not u or not u.is_admin or not u.totp_ativo:
+        return redirect(url_for("admin_login"))
+    erro = ""
+    if request.method == "POST":
+        if _limitado("adm2fa:" + _ip_cliente(), maximo=6):
+            erro = MSG_MUITAS_TENTATIVAS
+        elif _totp_confere(u.totp_segredo, request.form.get("codigo")):
+            _admin_iniciar_sessao(u)
+            return redirect(url_for("admin"))
+        else:
+            erro = '<div class="erro">Código inválido. Confira o app autenticador e tente de novo.</div>'
+    corpo = f"""<h2>Verificação em duas etapas</h2>
+    <div class="sub">Digite o código de 6 dígitos que aparece no seu app autenticador.</div>{erro}
+    <form method="post">
+      <label>Código</label>
+      <input name="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus placeholder="000000">
+      <button class="btn" type="submit">Verificar</button>
+    </form>
+    <div class="link"><a href="/admin/login">← Voltar</a></div>"""
+    return _pagina_auth("Admin · verificação", corpo)
+
+
+@app.route("/admin/2fa", methods=["GET", "POST"])
+def admin_2fa():
+    """Ativa/desativa a verificação em duas etapas (app autenticador) do admin logado."""
+    if not _admin_logado():
+        return redirect(url_for("admin_login"))
+    email = session.get("admin_email") or (current_user.email if current_user.is_authenticated else None)
+    u = User.query.filter_by(email=email).first() if email else None
+    if not u or not u.is_admin:
+        return redirect(url_for("admin_login"))
+    ok_css = ("background:#e9f7ee;color:#1b5e20;border:1px solid #7ec891;border-radius:10px;"
+              "padding:12px 14px;margin-bottom:14px;font-size:.9rem")
+    erro_css = ("background:#fdecea;color:#7a2218;border:1px solid #e8a49a;border-radius:10px;"
+                "padding:12px 14px;margin-bottom:14px;font-size:.9rem")
+    aviso = ""
+    if request.method == "POST":
+        if not _admin_csrf_ok():
+            return redirect(url_for("admin_login"))
+        codigo = request.form.get("codigo")
+        if request.form.get("acao") == "ativar":
+            seg = session.get("totp_novo")
+            if seg and _totp_confere(seg, codigo):
+                u.totp_segredo, u.totp_ativo = seg, True
+                db.session.commit()
+                session.pop("totp_novo", None)
+                _log_admin("ativou a verificação em duas etapas", u.email)
+                aviso = (f'<div style="{ok_css}">✅ Verificação em duas etapas ativada. '
+                         'No próximo login do painel, o código do app será pedido.</div>')
+            else:
+                aviso = (f'<div style="{erro_css}">Código inválido. Confira se escaneou o QR code '
+                         'abaixo e digite o código que está aparecendo agora no app.</div>')
+        elif request.form.get("acao") == "desativar":
+            if ADMIN_2FA_DESLIGADO or _totp_confere(u.totp_segredo, codigo):
+                u.totp_segredo, u.totp_ativo = None, False
+                db.session.commit()
+                _log_admin("desativou a verificação em duas etapas", u.email)
+                aviso = f'<div style="{ok_css}">Verificação em duas etapas desativada.</div>'
+            else:
+                aviso = f'<div style="{erro_css}">Código inválido — a verificação continua ativa.</div>'
+    tok = _admin_csrf()
+    btn = ("border:none;border-radius:10px;padding:11px 18px;font-weight:700;cursor:pointer;"
+           "font-size:.9rem;color:#fff;")
+    campo = ('<input class="busca" name="codigo" inputmode="numeric" autocomplete="one-time-code" '
+             'maxlength="7" placeholder="000000" required style="max-width:170px;margin:0">')
+    if u.totp_ativo:
+        corpo = f"""<div class="painel">
+      <p style="font-size:.95rem">🔐 <b>Ativa.</b> Para entrar no painel, além da senha, é pedido o código de 6 dígitos do app autenticador.</p>
+      <form method="post" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="hidden" name="t" value="{tok}"><input type="hidden" name="acao" value="desativar">
+        {campo}
+        <button style="{btn}background:#a3271a">Desativar</button>
+      </form></div>"""
+    else:
+        seg = session.get("totp_novo")
+        if not seg:
+            seg = base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+            session["totp_novo"] = seg
+        uri = (f"otpauth://totp/Repactua:{urllib.parse.quote(u.email)}"
+               f"?secret={seg}&issuer=Repactua&digits=6&period=30")
+        qr = _qr_svg(uri)
+        chave = " ".join(seg[i:i + 4] for i in range(0, len(seg), 4))
+        corpo = f"""<div class="painel">
+      <p><b>1.</b> Instale no celular um app autenticador (Google Authenticator, Microsoft Authenticator ou Authy).</p>
+      <p style="margin-top:8px"><b>2.</b> No app, escaneie o QR code — ou digite a chave manualmente.</p>
+      <div style="margin:14px 0">{qr}</div>
+      <p style="font-size:.85rem">Chave: <code style="font-size:.95rem;letter-spacing:1px">{chave}</code></p>
+      <p style="margin-top:12px"><b>3.</b> Digite o código de 6 dígitos que aparecer no app para confirmar:</p>
+      <form method="post" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="hidden" name="t" value="{tok}"><input type="hidden" name="acao" value="ativar">
+        {campo}
+        <button style="{btn}background:linear-gradient(135deg,#bf8f1e,#d9a92e)">Ativar</button>
+      </form></div>"""
+    conteudo = f"""<h1>Segurança do painel</h1>
+    <div class="sub">Verificação em duas etapas do acesso de administrador ({u.email})</div>
+    {aviso}{corpo}
+    <p class="nota">Perdeu o celular? No Railway, crie a variável <b>ADMIN_2FA_OFF=1</b> no serviço web, entre
+    no painel só com a senha, desative ou reconfigure aqui e depois apague a variável.</p>"""
+    return _admin_page("Segurança", conteudo, "seg")
 
 
 @app.route("/admin/logout")
@@ -2870,6 +3043,7 @@ def _admin_page(titulo, conteudo, ativo="dash", extra_js=""):
         ("logs", "/admin/logs", "📜", "Atividades"),
         ("sub", "/admin/subconta", "🏦", "Subconta"),
         ("wh", "/admin/configurar-webhook", "🔗", "Webhook"),
+        ("seg", "/admin/2fa", "🔐", "Segurança"),
         ("calc", "/calculadora", "🧮", "Calculadora"),
     ]
     menu = "".join(
@@ -2910,7 +3084,7 @@ def admin():
     """Dashboard: visão geral do negócio (receita, contas, uso de IA, casos)."""
     if not _admin_logado():
         return redirect(url_for("admin_login"))
-    mes_atual = datetime.utcnow().strftime("%Y-%m")
+    mes_atual = _agora_utc().strftime("%Y-%m")
     orgs = Escritorio.query.all()
     ativos = sum(1 for o in orgs if o.status == "ativo")
     trials = sum(1 for o in orgs if o.status == "trial")
@@ -2924,7 +3098,7 @@ def admin():
     total_casos = Caso.query.count()
     total_users = User.query.count()
     conv_pct = round(pagantes * 100 / len(orgs)) if orgs else 0
-    agora = datetime.utcnow()
+    agora = _agora_utc()
     v_hoje = Visita.query.filter(Visita.quando >= agora.replace(hour=0, minute=0, second=0)).count()
     # contagens de visitas antes do card do funil (que usa v_30d)
     v_7d = Visita.query.filter(Visita.quando >= agora - timedelta(days=7)).count()
@@ -2992,7 +3166,7 @@ def admin():
     # novos cadastros por mês (contas)
     cad_por_mes = {}
     for o in orgs:
-        k = (o.criado_em or datetime.utcnow()).strftime("%Y-%m")
+        k = (o.criado_em or _agora_utc()).strftime("%Y-%m")
         cad_por_mes[k] = cad_por_mes.get(k, 0) + 1
     lab_r, val_r = _serie_6_meses(receita_por_mes)
     lab_c, val_c = _serie_6_meses(cad_por_mes)
@@ -3009,7 +3183,7 @@ def admin():
           <td><b>{o.nome or '—'}</b><br><small>{dono.email if dono else '—'}</small></td>
           <td>{PLANOS.get(o.plano, {}).get('nome', o.plano or '—')}</td>
           <td><span class="badge {cls}">{sit}</span></td>
-          <td>{(o.criado_em or datetime.utcnow()).strftime('%d/%m/%Y')}</td></tr>"""
+          <td>{(o.criado_em or _agora_utc()).strftime('%d/%m/%Y')}</td></tr>"""
     if not linhas_rec:
         linhas_rec = '<tr><td colspan="4" style="color:#8a97a5">Nenhuma conta ainda.</td></tr>'
 
@@ -3018,7 +3192,7 @@ def admin():
 
     conteudo = f"""
     <h1>Dashboard</h1>
-    <div class="sub">Visão geral do Repactua · {datetime.utcnow().strftime('%d/%m/%Y')}</div>
+    <div class="sub">Visão geral do Repactua · {_agora_utc().strftime('%d/%m/%Y')}</div>
     <div class="cards">
       <div class="mc verde"><div class="lbl">Recebido este mês</div><div class="val">{moeda(receb_mes)}</div></div>
       <div class="mc verde"><div class="lbl">Recebido (total)</div><div class="val">{moeda(receb_total)}</div></div>
@@ -3093,7 +3267,7 @@ def admin_assinantes():
                      f"{org.total_membros}/{org.max_membros} acessos</small>")
         else:
             extra = ""
-        uso_mes = (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime('%Y-%m') else 0
+        uso_mes = (u.usage_contagem or 0) if u.usage_mes == _agora_utc().strftime('%Y-%m') else 0
         selo_admin = ' <span style="background:#1a3a5c;color:#e6b84d;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:700">ADMIN</span>' if u.is_admin else ''
         protegido = (u.email == ADMIN_EMAIL) or (u.email == session.get("admin_email"))
         if u.is_admin:
@@ -3171,7 +3345,7 @@ def admin_org(oid):
     cls = {"ativo": "b-ativo", "trial": "b-trial"}.get(org.status, "b-inativo")
     validade = org.acesso_ate.strftime("%d/%m/%Y") if org.acesso_ate else "sem expiração"
     n_casos = Caso.query.filter_by(org_id=org.id).count()
-    mes = datetime.utcnow().strftime("%Y-%m")
+    mes = _agora_utc().strftime("%Y-%m")
 
     # Dono (responsável) e dados cadastrais completos
     dono = next((u for u in (org.usuarios or []) if (u.papel or "dono") == "dono"),
@@ -3267,7 +3441,7 @@ def admin_org(oid):
     conteudo = f"""
     <a href="/admin/assinantes" style="color:#2c5f8a;text-decoration:none;font-size:.85rem">← Voltar aos assinantes</a>
     <h1 style="margin-top:8px">{org.nome or 'Conta'}</h1>
-    <div class="sub">Ficha da conta · cadastro em {(org.criado_em or datetime.utcnow()).strftime('%d/%m/%Y')}</div>
+    <div class="sub">Ficha da conta · cadastro em {(org.criado_em or _agora_utc()).strftime('%d/%m/%Y')}</div>
     {aviso}
     <div class="cards">
       <div class="mc"><div class="lbl">Plano</div><div class="val" style="font-size:1.1rem">{plano_nome}</div>
@@ -3318,7 +3492,7 @@ def admin_resetuso(uid):
         return redirect(url_for("admin_login"))
     u = db.session.get(User, uid)
     if u:
-        u.usage_mes = datetime.utcnow().strftime("%Y-%m")
+        u.usage_mes = _agora_utc().strftime("%Y-%m")
         u.usage_contagem = 0
         db.session.commit()
         _log_admin("zerou o uso do mês", u.email)
@@ -3418,7 +3592,7 @@ def admin_logs():
         return redirect(url_for("admin_login"))
     logs = LogAdmin.query.order_by(LogAdmin.quando.desc()).limit(200).all()
     linhas = "".join(
-        f"<tr><td>{(l.quando or datetime.utcnow()).strftime('%d/%m/%Y %H:%M')}</td>"
+        f"<tr><td>{(l.quando or _agora_utc()).strftime('%d/%m/%Y %H:%M')}</td>"
         f"<td>{l.admin_email or '—'}</td><td>{l.acao or '—'}</td><td>{l.alvo or '—'}</td></tr>"
         for l in logs) or '<tr><td colspan="4" style="color:#8a97a5">Nenhuma atividade registrada ainda.</td></tr>'
     conteudo = f"""
@@ -3449,10 +3623,10 @@ def export_assinantes():
             u.nome or "", u.email, u.escritorio or "",
             (org.plano if org else ""), u.papel or "dono", u.status_efetivo,
             u.cota_mensal or 0,
-            (u.usage_contagem or 0) if u.usage_mes == datetime.utcnow().strftime("%Y-%m") else 0,
+            (u.usage_contagem or 0) if u.usage_mes == _agora_utc().strftime("%Y-%m") else 0,
             (org.telefone if org else "") or "", (org.cidade if org else "") or "",
             (org.uf if org else "") or "",
-            (u.criado_em or datetime.utcnow()).strftime("%d/%m/%Y"),
+            (u.criado_em or _agora_utc()).strftime("%d/%m/%Y"),
         ])
     _log_admin("exportou CSV de assinantes")
     return _csv_response("assinantes-repactua.csv",
@@ -3701,7 +3875,7 @@ def admin_financeiro():
         email = dono.email if dono else "—"
         plano_nome = PLANOS.get(o.plano, {}).get("nome", o.plano or "—")
         valor_fmt = ("R$ %.2f/mês" % valor).replace(".", ",")
-        cadastro = (o.criado_em or datetime.utcnow()).strftime("%d/%m/%Y")
+        cadastro = (o.criado_em or _agora_utc()).strftime("%d/%m/%Y")
         cls = {"ativo": "b-ativo", "trial": "b-trial", "inativo": "b-inativo"}.get(o.status, "b-trial")
         sit = {"ativo": "Em dia", "trial": "Em teste", "inativo": "Inativo"}.get(o.status, o.status)
         tag_cortesia = '<br><small style="color:#bf8f1e">cortesia</small>' if (o.status == "ativo" and not pago) else ""
@@ -3728,7 +3902,7 @@ def admin_financeiro():
 
     pags = _pagamentos_repactua()
     RECEBIDO = ("RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH")
-    mes_atual = datetime.utcnow().strftime("%Y-%m")
+    mes_atual = _agora_utc().strftime("%Y-%m")
     receb_mes = receb_total = a_receber = 0.0
     por_mes = {}
     for p in pags:

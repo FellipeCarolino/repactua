@@ -311,13 +311,53 @@ def test_inicio_avisa_pagamento_pendente():
 
 def test_paineis_do_admin_carregam():
     """Regressão: o dashboard do admin chegou a dar 500 (variável usada antes de existir)."""
-    from datetime import datetime as _dt
     uid, email, oid = _usuario_teste(admin=True)
     c = _client()
     with c.session_transaction() as s:
         s["admin_ok"] = True
         s["admin_email"] = email
-        s["admin_desde"] = _dt.utcnow().isoformat()
+        s["admin_desde"] = server._agora_utc().isoformat()
         s["admin_csrf"] = "tok"
-    for rota in ["/admin", "/admin/assinantes", f"/admin/org/{oid}", "/admin/financeiro", "/admin/logs"]:
+    for rota in ["/admin", "/admin/assinantes", f"/admin/org/{oid}", "/admin/financeiro", "/admin/logs",
+                 "/admin/2fa"]:
         assert c.get(rota).status_code == 200, rota
+
+
+# ---------- Verificação em duas etapas do admin ----------
+import base64  # noqa: E402
+
+
+def test_totp_vetores_oficiais_rfc6238():
+    seg = base64.b32encode(b"12345678901234567890").decode()
+    assert server._totp(seg, t=59, digitos=8) == "94287082"
+    assert server._totp(seg, t=1111111109, digitos=8) == "07081804"
+    assert server._totp(seg, t=1234567890, digitos=8) == "89005924"
+
+
+def _ativar_2fa(uid):
+    seg = base64.b32encode(uuid.uuid4().bytes).decode().rstrip("=")
+    with server.app.app_context():
+        u = server.db.session.get(server.User, uid)
+        u.totp_segredo, u.totp_ativo = seg, True
+        server.db.session.commit()
+    return seg
+
+
+def test_admin_com_2fa_exige_codigo():
+    uid, email, _ = _usuario_teste(admin=True)
+    seg = _ativar_2fa(uid)
+    c = _client()
+    r = c.post("/admin/login", data={"email": email, "senha": SENHA_OK})
+    assert r.status_code == 302 and "/admin/login/2fa" in r.headers["Location"]
+    assert c.get("/admin").status_code == 302  # só a senha não abre o painel
+    errado = "000000" if server._totp(seg) != "000000" else "111111"
+    c.post("/admin/login/2fa", data={"codigo": errado})
+    assert c.get("/admin").status_code == 302  # código errado não abre
+    c.post("/admin/login/2fa", data={"codigo": server._totp(seg)})
+    assert c.get("/admin").status_code == 200
+
+
+def test_admin_com_2fa_nao_entra_pelo_login_comum():
+    uid, _, _ = _usuario_teste(admin=True)
+    _ativar_2fa(uid)
+    assert _logado(uid).get("/admin").status_code == 302
