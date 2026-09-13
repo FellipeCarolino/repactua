@@ -41,6 +41,7 @@ from flask_login import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.exceptions import HTTPException
+from sqlalchemy.exc import IntegrityError
 import traceback
 import anthropic
 
@@ -385,6 +386,14 @@ class Evento(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     quando = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     nome = db.Column(db.String(60), index=True)  # signup_view | signup_ok | email_confirmado | assinatura_ativa
+
+
+class WebhookEvento(db.Model):
+    """Eventos do Asaas já processados — idempotência (cada pagamento conta uma única vez)."""
+    __tablename__ = "webhook_evento"
+    id = db.Column(db.Integer, primary_key=True)
+    chave = db.Column(db.String(160), unique=True, nullable=False, index=True)  # ex.: "pago:pay_123"
+    quando = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class Caso(db.Model):
@@ -2440,6 +2449,7 @@ def asaas_webhook():
     evento = request.get_json(silent=True) or {}
     tipo = evento.get("event", "")
     pagamento = evento.get("payment", {}) or {}
+    pay_id = pagamento.get("id") or ""
     cust_id = pagamento.get("customer")
     email = (pagamento.get("customerEmail") or "").lower()
     org = None
@@ -2448,34 +2458,65 @@ def asaas_webhook():
     if not org and email:
         u = User.query.filter_by(email=email).first()
         org = u.org if u else None
-    if org:
-        if tipo in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
-            if org.status != "ativo":
-                _evento("assinatura_ativa")  # só na 1ª ativação (renovações não contam no funil)
-            org.status = "ativo"
-            org.acesso_ate = date.today() + timedelta(days=37)  # 1 mês + folga
-            if cust_id and not org.asaas_customer_id:
-                org.asaas_customer_id = cust_id
-            _enviar_email(
-                "💰 Repactua: pagamento recebido",
-                f"Pagamento confirmado de {org.nome or email or cust_id} "
-                f"(R$ {pagamento.get('value', '?')}) — conta ativada/renovada.")
-            dono = next((u for u in (org.usuarios or []) if u.papel == "dono"), None)
-            if dono:
-                _enviar_email(
-                    "Pagamento confirmado — Repactua ✅",
-                    f"Olá{', ' + dono.nome if dono.nome else ''}!\n\n"
-                    f"Recebemos seu pagamento de R$ {pagamento.get('value', '')} e sua assinatura "
-                    f"do Repactua está ativa até {org.acesso_ate.strftime('%d/%m/%Y') if org.acesso_ate else '—'}.\n\n"
-                    "A nota fiscal será emitida automaticamente e enviada pelo nosso parceiro de pagamentos.\n\n"
-                    "Bom trabalho!\nEquipe Repactua · repactua.com.br",
-                    para=dono.email)
-        elif tipo in ("PAYMENT_OVERDUE", "PAYMENT_DELETED", "PAYMENT_REFUNDED", "SUBSCRIPTION_DELETED"):
-            org.status = "inativo"
-            _enviar_email(
-                "⚠️ Repactua: pagamento com problema",
-                f"Evento {tipo} para {org.nome or email or cust_id} — conta inativada.")
+    if not org:
+        return jsonify({"ok": True})
+
+    # Cortesia vitalícia (ativa, sem assinatura, sem data de expiração): nenhum evento do Asaas mexe nela.
+    cortesia = org.status == "ativo" and not org.asaas_subscription_id and org.acesso_ate is None
+    # A cobrança é da assinatura vigente? Eventos de assinaturas antigas/canceladas não bloqueiam ninguém.
+    da_assinatura_atual = (bool(org.asaas_subscription_id)
+                           and pagamento.get("subscription") == org.asaas_subscription_id)
+
+    emails = []  # (assunto, corpo, para) — só são enviados depois de gravar no banco
+    primeira_ativacao = False
+    if tipo in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
+        if cortesia:
+            return jsonify({"ok": True, "ignorado": "cortesia"})
+        # No cartão o Asaas manda CONFIRMED e, 32 dias depois, RECEIVED do MESMO pagamento, e a entrega é
+        # "ao menos uma vez" — a chave única garante que cada pagamento ative/renove uma vez só.
+        if pay_id:
+            db.session.add(WebhookEvento(chave="pago:" + pay_id))
+        primeira_ativacao = org.status != "ativo"
+        org.status = "ativo"
+        org.acesso_ate = date.today() + timedelta(days=37)  # 1 mês + folga
+        if cust_id and not org.asaas_customer_id:
+            org.asaas_customer_id = cust_id
+        emails.append(("💰 Repactua: pagamento recebido",
+                       f"Pagamento confirmado de {org.nome or email or cust_id} "
+                       f"(R$ {pagamento.get('value', '?')}) — conta ativada/renovada.", None))
+        dono = next((u for u in (org.usuarios or []) if u.papel == "dono"), None)
+        if dono:
+            emails.append((
+                "Pagamento confirmado — Repactua ✅",
+                f"Olá{', ' + dono.nome if dono.nome else ''}!\n\n"
+                f"Recebemos seu pagamento de R$ {pagamento.get('value', '')} e sua assinatura "
+                f"do Repactua está ativa até {org.acesso_ate.strftime('%d/%m/%Y')}.\n\n"
+                "A nota fiscal será emitida automaticamente e enviada pelo nosso parceiro de pagamentos.\n\n"
+                "Bom trabalho!\nEquipe Repactua · repactua.com.br",
+                dono.email))
+    elif tipo in ("PAYMENT_OVERDUE", "PAYMENT_REFUNDED"):
+        # Atraso só bloqueia se for cobrança da assinatura vigente; estorno bloqueia (exceto cortesia).
+        if cortesia or (tipo == "PAYMENT_OVERDUE" and not da_assinatura_atual):
+            return jsonify({"ok": True, "ignorado": "fora da assinatura vigente"})
+        if pay_id:
+            db.session.add(WebhookEvento(chave=f"{tipo}:{pay_id}"))
+        org.status = "inativo"
+        emails.append(("⚠️ Repactua: pagamento com problema",
+                       f"Evento {tipo} para {org.nome or email or cust_id} — conta inativada.", None))
+    else:
+        # PAYMENT_DELETED / SUBSCRIPTION_DELETED etc.: excluir uma cobrança NÃO é inadimplência
+        # (acontece ao cancelar a assinatura ou dar cortesia) — o acesso segue a data já paga.
+        return jsonify({"ok": True})
+
+    try:
         db.session.commit()
+    except IntegrityError:  # evento repetido: já processado antes
+        db.session.rollback()
+        return jsonify({"ok": True, "duplicado": True})
+    if primeira_ativacao:
+        _evento("assinatura_ativa")  # só na 1ª ativação (renovações não contam no funil)
+    for assunto, corpo, para in emails:
+        _enviar_email(assunto, corpo, para=para)
     return jsonify({"ok": True})
 
 
