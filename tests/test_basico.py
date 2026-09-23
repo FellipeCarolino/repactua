@@ -361,3 +361,46 @@ def test_admin_com_2fa_nao_entra_pelo_login_comum():
     uid, _, _ = _usuario_teste(admin=True)
     _ativar_2fa(uid)
     assert _logado(uid).get("/admin").status_code == 302
+
+
+# ---------- Desempenho: gzip, cache por ETag e consultas sem N+1 ----------
+import gzip  # noqa: E402
+
+
+def test_landing_gzip_e_304_por_etag():
+    c = _client()
+    r = c.get("/", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert r.headers["Content-Encoding"] == "gzip"
+    assert "no-store" not in r.headers["Cache-Control"]
+    with open(os.path.join(server.BASE_DIR, "landing.html"), "rb") as f:
+        assert gzip.decompress(r.get_data()) == f.read()
+    r2 = c.get("/", headers={"If-None-Match": r.headers["ETag"]})
+    assert r2.status_code == 304 and r2.get_data() == b""
+    # navegador sem gzip recebe o HTML puro
+    r3 = c.get("/")
+    assert "Content-Encoding" not in r3.headers and b"<html" in r3.get_data().lower()
+
+
+def test_calculadora_privada_comprimida():
+    uid, _, _ = _usuario_teste()
+    r = _logado(uid).get("/calculadora", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert r.headers["Content-Encoding"] == "gzip"
+    assert r.headers["Cache-Control"].startswith("private")
+
+
+def test_paginas_dinamicas_seguem_sem_cache_e_comprimidas():
+    r = _client().get("/login", headers={"Accept-Encoding": "gzip"})
+    assert "no-store" in r.headers["Cache-Control"]
+    assert r.headers.get("Content-Encoding") == "gzip"
+    assert "<form" in gzip.decompress(r.get_data()).decode()
+
+
+def test_listar_casos_com_autor():
+    uid, _, _ = _usuario_teste()
+    c = _logado(uid)
+    assert c.post("/api/casos", json={"nomeCaso": "Caso X", "dados": {}, "dividas": []}).status_code == 200
+    casos = c.get("/api/casos").get_json()["casos"]
+    assert casos and all("autor" in x for x in casos)
+    assert c.get("/").status_code == 200

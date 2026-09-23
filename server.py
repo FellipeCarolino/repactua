@@ -18,6 +18,7 @@ Variáveis de ambiente:
 """
 
 import base64
+import gzip
 import io
 import json
 import os
@@ -37,7 +38,7 @@ from datetime import datetime, date, timedelta, timezone
 from functools import wraps
 
 from flask import (
-    Flask, request, jsonify, send_from_directory, redirect, url_for, Response, session
+    Flask, request, jsonify, redirect, url_for, Response, session
 )
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
@@ -46,6 +47,7 @@ from flask_login import (
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.exceptions import HTTPException
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload, selectinload
 import traceback
 import anthropic
 
@@ -1402,19 +1404,63 @@ def _registrar_visita():
         db.session.rollback()
 
 
-def _sem_cache(resp):
-    """Força o navegador a sempre buscar a versão mais nova do HTML."""
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
+# --- Desempenho: páginas estáticas em memória + compressão gzip ---
+_PAGINAS_CACHE = {}  # {nome: (mtime, bytes, gzip_bytes, etag)}
+_GZIP_TIPOS = ("text/", "application/json", "application/javascript", "image/svg+xml")
+_GZIP_MIN = 1024  # abaixo disso a compressão não compensa
+
+
+def _pagina_estatica(nome, privada=False):
+    """Serve landing.html/index.html lidos do disco uma vez só (relidos se o arquivo mudar),
+    já comprimidos, com ETag: o navegador revalida a cada acesso (update aparece na hora),
+    mas se nada mudou recebe 304 sem corpo em vez dos ~200 KB da calculadora."""
+    caminho = os.path.join(BASE_DIR, nome)
+    mtime = os.path.getmtime(caminho)
+    item = _PAGINAS_CACHE.get(nome)
+    if not item or item[0] != mtime:
+        with open(caminho, "rb") as f:
+            bruto = f.read()
+        item = (mtime, bruto, gzip.compress(bruto, 9), hashlib.sha256(bruto).hexdigest()[:20])
+        _PAGINAS_CACHE[nome] = item
+    _, bruto, comprimido, etag = item
+    resp = Response(mimetype="text/html")
+    resp.set_etag(etag)
+    resp.headers["Cache-Control"] = ("private, " if privada else "") + "no-cache"
+    resp.vary.add("Accept-Encoding")
+    if etag in request.if_none_match:
+        resp.status_code = 304
+        return resp
+    if "gzip" in (request.headers.get("Accept-Encoding") or "").lower():
+        resp.set_data(comprimido)
+        resp.headers["Content-Encoding"] = "gzip"
+    else:
+        resp.set_data(bruto)
+    return resp
+
+
+def _comprimir(resp):
+    """Gzip nas respostas de texto (HTML do painel/admin, JSON dos casos, CSV) quando o navegador aceita."""
+    if (resp.direct_passthrough or resp.is_streamed or resp.status_code != 200
+            or "Content-Encoding" in resp.headers
+            or "gzip" not in (request.headers.get("Accept-Encoding") or "").lower()
+            or not (resp.mimetype or "").startswith(_GZIP_TIPOS)):
+        return resp
+    dados = resp.get_data()
+    if len(dados) < _GZIP_MIN:
+        return resp
+    resp.set_data(gzip.compress(dados, 6))
+    resp.headers["Content-Encoding"] = "gzip"
+    resp.vary.add("Accept-Encoding")
     return resp
 
 
 @app.after_request
 def _html_sem_cache(resp):
     """Qualquer página HTML (login, conta, admin…) sempre servida na versão mais nova,
-    para que atualizações de interface apareçam sem hard-refresh."""
-    if (resp.headers.get("Content-Type") or "").startswith("text/html"):
+    para que atualizações de interface apareçam sem hard-refresh.
+    (landing/calculadora definem o próprio Cache-Control: revalidação por ETag.)"""
+    if ((resp.headers.get("Content-Type") or "").startswith("text/html")
+            and "Cache-Control" not in resp.headers):
         resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
@@ -1425,7 +1471,7 @@ def _html_sem_cache(resp):
     resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     if _EM_PRODUCAO:
         resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-    return resp
+    return _comprimir(resp)
 
 
 @app.errorhandler(413)
@@ -1477,14 +1523,14 @@ Tente novamente em instantes — seus dados estão seguros.</p>
 def index():
     if not current_user.is_authenticated:
         _registrar_visita()
-        return _sem_cache(send_from_directory(BASE_DIR, "landing.html"))
+        return _pagina_estatica("landing.html")
     return render_home()
 
 
 @app.route("/calculadora")
 @login_required
 def calculadora():
-    return _sem_cache(send_from_directory(BASE_DIR, "index.html"))
+    return _pagina_estatica("index.html", privada=True)
 
 
 def render_home():
@@ -1503,7 +1549,7 @@ def render_home():
     # casos do escritório
     qbase = Caso.query.filter_by(org_id=u.org_id) if u.org_id else Caso.query.filter_by(user_id=u.id)
     total_casos = qbase.count()
-    recentes = qbase.order_by(Caso.atualizado_em.desc()).limit(6).all()
+    recentes = qbase.options(joinedload(Caso.autor)).order_by(Caso.atualizado_em.desc()).limit(6).all()
 
     # --- Indicadores (metric cards) ---
     metricas = [
@@ -1662,7 +1708,7 @@ def casos_listar():
         q = q.filter_by(org_id=current_user.org_id)
     else:
         q = q.filter_by(user_id=current_user.id)
-    casos = q.order_by(Caso.atualizado_em.desc()).all()
+    casos = q.options(joinedload(Caso.autor)).order_by(Caso.atualizado_em.desc()).all()
     return jsonify({"ok": True, "casos": [_caso_to_dict(c, completo=True) for c in casos]})
 
 
@@ -3172,7 +3218,8 @@ def admin():
     lab_c, val_c = _serie_6_meses(cad_por_mes)
 
     # últimos cadastros
-    recentes = Escritorio.query.order_by(Escritorio.criado_em.desc()).limit(5).all()
+    recentes = (Escritorio.query.options(selectinload(Escritorio.usuarios))
+                .order_by(Escritorio.criado_em.desc()).limit(5).all())
     linhas_rec = ""
     for o in recentes:
         dono = next((u for u in (o.usuarios or []) if u.papel == "dono"), None) or \
@@ -3254,7 +3301,8 @@ def admin_assinantes():
             return (0, org.acesso_ate.toordinal())
         ts = u.criado_em.timestamp() if u.criado_em else 0
         return (1, -ts)
-    users = sorted(User.query.all(), key=_chave_ordem)
+    users = sorted(User.query.options(joinedload(User.org).selectinload(Escritorio.usuarios)).all(),
+                   key=_chave_ordem)
     tok = _admin_csrf()
     linhas = ""
     for u in users:
@@ -3617,7 +3665,7 @@ def export_assinantes():
     if not _admin_logado():
         return redirect(url_for("admin_login"))
     linhas = []
-    for u in User.query.order_by(User.criado_em.desc()).all():
+    for u in User.query.options(joinedload(User.org)).order_by(User.criado_em.desc()).all():
         org = u.org
         linhas.append([
             u.nome or "", u.email, u.escritorio or "",
@@ -3853,7 +3901,8 @@ def admin_financeiro():
     """Painel financeiro: receita real (Asaas), MRR, gráfico e assinantes."""
     if not _admin_logado():
         return redirect(url_for("admin_login"))
-    orgs = Escritorio.query.order_by(Escritorio.criado_em.desc()).all()
+    orgs = (Escritorio.query.options(selectinload(Escritorio.usuarios))
+            .order_by(Escritorio.criado_em.desc()).all())
     mrr = ativos = trials = inativos = 0
     linhas = ""
     pagantes = 0
