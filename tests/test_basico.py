@@ -372,3 +372,66 @@ def test_url_do_banco_fixa_o_driver_psycopg2():
     assert server._url_banco("postgresql://u:s@h:5432/d") == "postgresql+psycopg2://u:s@h:5432/d"
     assert server._url_banco("sqlite:///x.db") == "sqlite:///x.db"  # local segue intacto
     importlib.import_module("psycopg2")  # o driver precisa estar instalado
+
+# ---------- Chave do Asaas: heartbeat e avisos de expiração ----------
+def _logs(acao):
+    with server.app.app_context():
+        return server.LogAdmin.query.filter_by(acao=acao).count()
+
+
+def _rodar_heartbeat(fake_asaas):
+    """Roda o heartbeat com a chamada ao Asaas trocada por uma simulação."""
+    real_asaas, real_key = server.asaas, server.ASAAS_API_KEY
+    server.asaas, server.ASAAS_API_KEY = fake_asaas, "chave-de-teste"
+    try:
+        with server.app.app_context():
+            server._asaas_heartbeat()
+    finally:
+        server.asaas, server.ASAAS_API_KEY = real_asaas, real_key
+
+
+def test_heartbeat_usa_a_chave_do_asaas():
+    """A chamada diária é o que impede a chave de morrer por inatividade."""
+    chamadas = []
+    antes = _logs("chave Asaas ok")
+    _rodar_heartbeat(lambda m, p, payload=None, timeout=None:
+                     chamadas.append((m, p)) or {"email": "x@y.com"})
+    assert chamadas == [("GET", "/myAccount")]
+    assert _logs("chave Asaas ok") == antes + 1
+
+
+def test_heartbeat_avisa_quando_a_chave_falha():
+    def quebrada(metodo, path, payload=None, timeout=None):
+        raise RuntimeError("Asaas 401: unauthorized")
+    antes = _logs("FALHA na chave Asaas")
+    _rodar_heartbeat(quebrada)  # não pode levantar exceção: a régua precisa seguir
+    assert _logs("FALHA na chave Asaas") == antes + 1
+
+
+def test_heartbeat_sem_chave_configurada_nao_faz_nada():
+    real = server.ASAAS_API_KEY
+    server.ASAAS_API_KEY = ""
+    try:
+        with server.app.app_context():
+            server._asaas_heartbeat()  # só não pode quebrar
+    finally:
+        server.ASAAS_API_KEY = real
+
+
+def test_webhook_aceita_avisos_sobre_a_chave():
+    antes = _logs("aviso do Asaas sobre a chave")
+    for tipo in ("ACCESS_TOKEN_EXPIRING_SOON", "ACCESS_TOKEN_DISABLED", "ACCESS_TOKEN_EXPIRED"):
+        r = _client().post("/api/asaas-webhook", json={
+            "event": tipo,
+            "accessToken": {"id": "tok_1", "name": "Repactua", "enabled": False,
+                            "disableReason": "LACK_OF_USE",
+                            "projectedExpirationDateByLackOfUse": "2026-12-01"}})
+        assert r.status_code == 200, tipo
+    assert _logs("aviso do Asaas sobre a chave") == antes + 3
+
+
+def test_aviso_de_chave_nao_mexe_em_conta():
+    oid, cus, sub = _org_teste("ativo", acesso=date.today() + timedelta(days=20))
+    _client().post("/api/asaas-webhook", json={
+        "event": "ACCESS_TOKEN_EXPIRED", "accessToken": {"id": "t", "enabled": False}})
+    assert _estado(oid) == ("ativo", date.today() + timedelta(days=20))

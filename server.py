@@ -1777,6 +1777,38 @@ def extract_registrato():
     return _endpoint_extrair(PROMPT_REGISTRATO, SCHEMA_REGISTRATO, "registrato")
 
 
+def _asaas_heartbeat():
+    """Mantém a chave do Asaas viva e vigiada.
+    O Asaas DESABILITA chave sem uso por 3 meses e a EXPIRA de vez aos 6. Como o Repactua
+    chama o Asaas só quando alguém assina, a chave pode morrer parada — esta chamada leve
+    (1x/dia, pela régua) zera o contador de inatividade. Se ela falhar, o admin é avisado."""
+    if not ASAAS_API_KEY:
+        return
+    try:
+        conta = asaas("GET", "/myAccount", timeout=10)  # curto: roda dentro do /api/health
+        db.session.add(LogAdmin(admin_email="sistema", acao="chave Asaas ok",
+                                alvo=(conta.get("email") or "")[:200]))
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        detalhe = str(e)[:400]
+        try:
+            db.session.add(LogAdmin(admin_email="sistema", acao="FALHA na chave Asaas",
+                                    alvo=detalhe[:200]))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        _enviar_email(
+            "🔑 Repactua: a chave do Asaas parou de funcionar",
+            "A verificação diária da chave do Asaas falhou.\n\n"
+            f"Erro: {detalhe}\n\n"
+            "O que isso afeta: novas assinaturas e o painel Financeiro. As cobranças já "
+            "existentes e o webhook continuam funcionando.\n\n"
+            "Como resolver: no Asaas, em Integrações > Chaves de API, veja se a chave está "
+            "desabilitada (dá para reativar) ou expirada (aí gere uma nova). Depois atualize "
+            "ASAAS_API_KEY no Railway. Atenção: não mexa na chave do Meu Sagrado.")
+
+
 def _regua_diaria():
     """Tarefas diárias sem cron: disparadas pelo ping do monitoramento no /api/health.
     Um marcador no LogAdmin garante execução no máximo 1x por dia."""
@@ -1787,6 +1819,7 @@ def _regua_diaria():
             return
         db.session.add(LogAdmin(admin_email="sistema", acao="régua diária"))
         db.session.commit()
+        _asaas_heartbeat()  # antes do corte por e-mail: a chave precisa ser usada de qualquer jeito
         if not email_ativo():
             return
         # Trials que expiram amanhã (ou hoje) e ainda não foram avisados → e-mail com CTA
@@ -1863,7 +1896,7 @@ def health():
 # ============================================================
 # Assinatura (Asaas) — cobrança recorrente
 # ============================================================
-def asaas(method, path, payload=None):
+def asaas(method, path, payload=None, timeout=30):
     """Chamada à API do Asaas. Levanta RuntimeError em caso de erro."""
     if not ASAAS_API_KEY:
         raise RuntimeError("Pagamento ainda não configurado (ASAAS_API_KEY ausente).")
@@ -1873,7 +1906,7 @@ def asaas(method, path, payload=None):
         "access_token": ASAAS_API_KEY, "Content-Type": "application/json", "User-Agent": "Repactua",
     })
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         corpo = e.read().decode("utf-8", "ignore")
@@ -2628,6 +2661,32 @@ def asaas_webhook():
         return jsonify({"ok": False}), 401
     evento = request.get_json(silent=True) or {}
     tipo = evento.get("event", "")
+
+    # Avisos sobre a própria chave de API (payload traz 'accessToken', não 'payment')
+    if tipo.startswith("ACCESS_TOKEN_"):
+        tok = evento.get("accessToken") or {}
+        if tipo in ("ACCESS_TOKEN_EXPIRING_SOON", "ACCESS_TOKEN_DISABLED", "ACCESS_TOKEN_EXPIRED"):
+            urgencia = {"ACCESS_TOKEN_EXPIRING_SOON": "⏳ vai expirar",
+                        "ACCESS_TOKEN_DISABLED": "🚫 foi desabilitada",
+                        "ACCESS_TOKEN_EXPIRED": "❌ EXPIROU"}[tipo]
+            motivo = tok.get("disableReason") or "—"
+            previsto = tok.get("projectedExpirationDateByLackOfUse") or tok.get("expirationDate") or "—"
+            _enviar_email(
+                f"🔑 Repactua: chave do Asaas {urgencia}",
+                f"O Asaas avisou: {tipo}\n\n"
+                f"Chave: {tok.get('name') or tok.get('id') or '—'}\n"
+                f"Ativa: {tok.get('enabled')}\nMotivo: {motivo}\nPrevisão: {previsto}\n\n"
+                "Se foi por falta de uso, a verificação diária do Repactua deve evitar que se "
+                "repita. Confira em Integrações > Chaves de API — e não mexa na chave do "
+                "Meu Sagrado.")
+            try:
+                db.session.add(LogAdmin(admin_email="sistema", acao="aviso do Asaas sobre a chave",
+                                        alvo=tipo))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+        return jsonify({"ok": True})
+
     pagamento = evento.get("payment", {}) or {}
     pay_id = pagamento.get("id") or ""
     cust_id = pagamento.get("customer")
@@ -4043,7 +4102,10 @@ def admin_config_webhook():
                 "authToken": ASAAS_WEBHOOK_TOKEN,
                 "sendType": "SEQUENTIALLY",
                 "events": ["PAYMENT_CONFIRMED", "PAYMENT_RECEIVED", "PAYMENT_OVERDUE",
-                           "PAYMENT_DELETED", "PAYMENT_REFUNDED"],
+                           "PAYMENT_DELETED", "PAYMENT_REFUNDED",
+                           # avisos do ciclo de vida da chave de API (inatividade)
+                           "ACCESS_TOKEN_EXPIRING_SOON", "ACCESS_TOKEN_DISABLED",
+                           "ACCESS_TOKEN_EXPIRED"],
             })
             msg = f'<div class="ok"><b>Webhook configurado!</b> id: {r.get("id","")}</div>'
         except Exception as e:
