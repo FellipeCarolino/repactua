@@ -237,9 +237,20 @@ app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
 app.config["REMEMBER_COOKIE_DURATION"] = timedelta(days=30)  # "lembrar de mim" expira em 30 dias
 ADMIN_SESSAO_HORAS = 8  # sessão do painel admin expira e pede login de novo
 
-db_url = os.environ.get("DATABASE_URL", "sqlite:///" + os.path.join(BASE_DIR, "calculadora.db"))
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
+def _url_banco(raw):
+    """Normaliza a URL do banco e FIXA o driver do Postgres.
+    O Railway entrega "postgres://...". Versões novas do SQLAlchemy, ao verem só
+    "postgresql://", tentam o driver psycopg (v3) — que não instalamos (usamos
+    psycopg2-binary) — e o app não sobe. Por isso o driver vai explícito na URL."""
+    if raw.startswith("postgres://"):
+        raw = raw.replace("postgres://", "postgresql://", 1)
+    if raw.startswith("postgresql://"):
+        raw = raw.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return raw
+
+
+db_url = _url_banco(os.environ.get("DATABASE_URL",
+                                   "sqlite:///" + os.path.join(BASE_DIR, "calculadora.db")))
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 # Conexões resilientes: testa a conexão antes de usar (pool_pre_ping) e recicla a cada 5 min —

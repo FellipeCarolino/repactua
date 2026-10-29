@@ -361,3 +361,14 @@ def test_admin_com_2fa_nao_entra_pelo_login_comum():
     uid, _, _ = _usuario_teste(admin=True)
     _ativar_2fa(uid)
     assert _logado(uid).get("/admin").status_code == 302
+
+
+def test_url_do_banco_fixa_o_driver_psycopg2():
+    """Regressão: em 29/10/2026 o site caiu com 'No module named psycopg' — o SQLAlchemy novo
+    tentava o driver psycopg (v3) e o projeto instala psycopg2. Os testes rodam em SQLite e
+    não pegavam. Aqui checamos a URL de produção e a presença do driver."""
+    import importlib
+    assert server._url_banco("postgres://u:s@h:5432/d") == "postgresql+psycopg2://u:s@h:5432/d"
+    assert server._url_banco("postgresql://u:s@h:5432/d") == "postgresql+psycopg2://u:s@h:5432/d"
+    assert server._url_banco("sqlite:///x.db") == "sqlite:///x.db"  # local segue intacto
+    importlib.import_module("psycopg2")  # o driver precisa estar instalado
