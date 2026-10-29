@@ -1,8 +1,38 @@
-flask>=3.0
-anthropic>=0.49
-gunicorn>=21.2
-pypdf>=4.0
-flask-sqlalchemy>=3.1
-flask-login>=0.6
-psycopg2-binary>=2.9
-segno>=1.6
+# Versões TRAVADAS de propósito.
+# Em 29/10/2026 o site caiu (502) porque um deploy puxou SQLAlchemy 2.1, que passou a exigir
+# o driver psycopg (v3) no lugar do psycopg2 — sem versão travada, qualquer deploy virava loteria.
+# Para atualizar: suba as versões aqui, rode os testes e só então publique.
+
+# --- usadas diretamente pelo server.py ---
+Flask==3.1.3
+anthropic==2.3.0
+gunicorn==26.2.0
+pypdf==6.21.4
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+psycopg2-binary==2.9.13
+segno==1.6.6
+
+# --- dependências das de cima (travadas para o build ser sempre igual) ---
+annotated-types==0.8.0
+anyio==4.15.1
+blinker==1.9.0
+click==8.5.0
+docstring_parser==0.18.0
+h11==0.16.0
+httpcore2==2.16.0
+httpx2==2.16.0
+idna==3.20
+itsdangerous==2.2.0
+Jinja2==3.1.6
+jiter==0.18.0
+MarkupSafe==3.0.4
+opentelemetry-api==1.45.1
+pydantic==2.14.2
+pydantic_core==2.50.2
+sniffio==1.3.1
+SQLAlchemy==2.1.6
+truststore==0.10.5
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+Werkzeug==3.1.9
