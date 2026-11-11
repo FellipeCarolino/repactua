@@ -457,7 +457,7 @@
 
     .debt-parcelas-row {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr 1fr auto;
       gap: 8px;
       margin-top: 8px;
       padding-top: 10px;
@@ -1974,9 +1974,9 @@
     return TIPOS_DIVIDA.find(t => t.value === value) || TIPOS_DIVIDA[TIPOS_DIVIDA.length - 1];
   }
 
-  function adicionarDivida(credor = '', tipo = 'cartao', saldoCents = 0, parcelaCents = 0, emFolha = false, parcContratadas = '', parcPagas = '') {
+  function adicionarDivida(credor = '', tipo = 'cartao', saldoCents = 0, parcelaCents = 0, emFolha = false, parcContratadas = '', parcPagas = '', jurosMes = '', saldoEstimado = null) {
     const id = proximoId++;
-    dividas.push({ id, credor, tipo, saldoCents, parcelaCents, emFolha, parcContratadas, parcPagas });
+    dividas.push({ id, credor, tipo, saldoCents, parcelaCents, emFolha, parcContratadas, parcPagas, jurosMes, saldoEstimado });
     renderDividas();
   }
 
@@ -2010,7 +2010,7 @@
             <select onchange="atualizarDivida(${d.id},'tipo',this.value)">${opts}</select>
           </div>
           <div class="form-group" style="margin:0">
-            <label>Saldo Devedor</label>
+            <label>Saldo Devedor ${d.saldoEstimado ? `<span style="color:#9a6700;font-weight:700" title="${_textoEstimativa(d.saldoEstimado)}">≈</span>` : ''}</label>
             <div class="input-currency"><span>R$</span>
               <input type="text" class="money" inputmode="numeric" value="${d.saldoCents ? fmtCentsPlain(d.saldoCents) : ''}" placeholder="0,00"
                 oninput="mascararDividaInput(this, ${d.id}, 'saldoCents')" />
@@ -2041,6 +2041,16 @@
             <input type="text" id="restantes${d.id}" readonly value="${calcRestantes(d)}"
               style="background:#eef3f8;font-weight:700;color:var(--primary)" />
           </div>
+          <div class="form-group" style="margin:0">
+            <label>Juros % ao mês <span class="tooltip" data-tip="Taxa do contrato, para estimar o saldo devedor a partir da parcela e das parcelas que faltam. Em branco, o sistema usa ${JUROS_PADRAO_CONSIG.toFixed(2).replace('.', ',')}% a.m. (média do consignado). A taxa exata está no contrato ou no extrato.">?</span></label>
+            <input type="text" inputmode="decimal" value="${d.jurosMes || ''}" placeholder="Ex.: 1,80"
+              oninput="atualizarDivida(${d.id},'jurosMes',this.value)" />
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-outline" style="padding:7px 10px;font-size:0.78rem;white-space:nowrap"
+              onclick="estimarSaldoDivida(${d.id})" title="Calcula o saldo devedor de hoje a partir da parcela, das parcelas que faltam e dos juros">≈ Estimar saldo</button>
+          </div>
+          <div id="estSub${d.id}" style="grid-column:1/-1;font-size:0.72rem;color:#9a6700">${d.saldoEstimado ? 'Saldo ' + _textoEstimativa(d.saldoEstimado) : ''}</div>
         </div>
         <div class="debt-folha-flag">
           <input type="checkbox" id="folha${d.id}" ${d.emFolha ? 'checked' : ''}
@@ -2061,11 +2071,65 @@
     const cents = parseMoney(input.value);
     input.value = cents === 0 ? '' : fmtCentsPlain(cents);
     atualizarDivida(id, campo, cents);
+    if (campo === 'saldoCents') {   // valor digitado na mão deixa de ser estimativa
+      const d = dividas.find(x => x.id === id);
+      if (d && d.saldoEstimado) {
+        d.saldoEstimado = null;
+        const sub = document.getElementById('estSub' + id);
+        if (sub) sub.textContent = '';
+        const lbl = input.closest('.form-group').querySelector('label');
+        if (lbl) lbl.textContent = 'Saldo Devedor';   // tira o "≈"
+      }
+    }
   }
 
   function atualizarDivida(id, campo, valor) {
     const d = dividas.find(x => x.id === id);
     if (d) d[campo] = valor;
+  }
+
+  // ---- Saldo devedor estimado a partir da parcela e do prazo ----
+  // A soma das parcelas que faltam NÃO é o saldo devedor: ela já embute os juros futuros.
+  // O saldo de hoje é o valor presente dessas parcelas à taxa do contrato (Tabela Price).
+  const JUROS_PADRAO_CONSIG = 1.80;   // % a.m. — média do consignado; a taxa real está no contrato
+
+  function parseJuros(v) {
+    const n = parseFloat(String(v === null || v === undefined ? '' : v).replace(',', '.').replace(/[^\d.]/g, ''));
+    return isNaN(n) || n < 0 ? 0 : n;
+  }
+
+  function _textoEstimativa(est) {
+    return `≈ ${est.n} parcela(s) a ${String(est.juros).replace('.', ',')}% a.m. — confirmar por extrato`;
+  }
+
+  function valorPresente(parcelaCents, n, jurosPct) {
+    const i = jurosPct / 100;
+    if (n <= 0 || parcelaCents <= 0) return 0;
+    if (i <= 0) return parcelaCents * n;                       // sem juros: soma simples
+    return Math.round(parcelaCents * (1 - Math.pow(1 + i, -n)) / i);
+  }
+
+  function estimarSaldoDivida(id) {
+    const d = dividas.find(x => x.id === id);
+    if (!d) return;
+    const contr = parseInt(d.parcContratadas) || 0;
+    const faltam = contr > 0 ? Math.max(contr - (parseInt(d.parcPagas) || 0), 0) : 0;
+    if (!faltam) {
+      alert('Para estimar o saldo, informe as parcelas contratadas e as já pagas desta dívida.');
+      return;
+    }
+    if (!d.parcelaCents) {
+      alert('Informe a parcela mensal desta dívida para estimar o saldo.');
+      return;
+    }
+    let juros = parseJuros(d.jurosMes);
+    if (!juros) {
+      juros = JUROS_PADRAO_CONSIG;
+      d.jurosMes = JUROS_PADRAO_CONSIG.toFixed(2).replace('.', ',');
+    }
+    d.saldoCents = valorPresente(d.parcelaCents, faltam, juros);
+    d.saldoEstimado = { n: faltam, juros: d.jurosMes };
+    renderDividas();
   }
 
   function calcRestantes(d) {
@@ -2222,7 +2286,13 @@
       <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px">Se o contracheque mostrar algo como <b>024/096</b>, são <b>24 parcelas pagas</b> de <b>96 contratadas</b> — é essa ordem nos dois campos. Em branco = o documento não trouxe o prazo; preencha se souber.</div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
       <table style="width:100%;min-width:430px"><thead><tr><th style="width:52px">Incluir</th><th>Credor</th><th style="width:104px">Parcela/mês</th><th style="width:132px">Parcelas pagas / total</th></tr></thead>
-      <tbody>${consigRows}</tbody></table></div>` : '';
+      <tbody>${consigRows}</tbody></table></div>
+      <label style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:0.82rem;flex-wrap:wrap">
+        <input type="checkbox" id="cfc_estimar" checked style="width:16px;height:16px">
+        Estimar o saldo devedor dos consignados que têm prazo, a juros de
+        <input id="cfc_juros" type="text" inputmode="decimal" value="${JUROS_PADRAO_CONSIG.toFixed(2).replace('.', ',')}" style="width:62px;padding:5px;text-align:center"> % ao mês
+      </label>
+      <div style="font-size:0.74rem;color:var(--text-muted);margin-top:4px">O holerite não traz o saldo devedor. A estimativa é o <b>valor presente</b> das parcelas que faltam — serve para dimensionar o passivo e o plano de pagamento; o valor exato deve ser confirmado por extrato ou contrato. Os saldos estimados ficam marcados com <b>≈</b> na tela, no relatório e na minuta.</div>` : '';
     const obs = d.observacoes ? `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem">💡 <b>Observações da IA:</b> ${escHtml(d.observacoes)}</div>` : '';
     // Situação do IR: nunca deixar cair no "automático" sem querer —
     // p/ isentos (ex.: moléstia grave) o auto descontaria um imposto inexistente e reduziria a margem.
@@ -2310,9 +2380,16 @@
         (d.consignados || []).forEach((c, i) => {
           const ok = g('cfc_ok_' + i);
           if (ok && ok.checked) {
-            adicionarDivida(g('cfc_cred_' + i).value || 'Consignado', 'consignado', 0,
-                            parseMoney(g('cfc_par_' + i).value), true,
-                            g('cfc_tot_' + i).value, g('cfc_pag_' + i).value);
+            const parcela = parseMoney(g('cfc_par_' + i).value);
+            const tot = g('cfc_tot_' + i).value, pag = g('cfc_pag_' + i).value;
+            const faltam = (parseInt(tot) || 0) > 0 ? Math.max((parseInt(tot) || 0) - (parseInt(pag) || 0), 0) : 0;
+            const estimar = g('cfc_estimar') && g('cfc_estimar').checked && faltam > 0 && parcela > 0;
+            const juros = parseJuros(g('cfc_juros') ? g('cfc_juros').value : '') || JUROS_PADRAO_CONSIG;
+            adicionarDivida(g('cfc_cred_' + i).value || 'Consignado', 'consignado',
+                            estimar ? valorPresente(parcela, faltam, juros) : 0,
+                            parcela, true, tot, pag,
+                            estimar ? juros.toFixed(2).replace('.', ',') : '',
+                            estimar ? { n: faltam, juros: juros.toFixed(2).replace('.', ',') } : null);
             n++;
           }
         });
@@ -2906,7 +2983,7 @@
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><strong>${d.credor || '—'}</strong><br><span style="font-size:0.78rem;color:var(--text-muted)">${tipo.label}</span></td>
-        <td class="td-right">${fmtCents(d.saldoCents || 0)}</td>
+        <td class="td-right">${d.saldoEstimado ? '<span style="color:#9a6700" title="estimado a partir da parcela e do prazo">≈ </span>' : ''}${fmtCents(d.saldoCents || 0)}</td>
         <td class="td-right">${fmtCents(d.parcelaCents || 0)}</td>
         <td class="td-right">${contr || '—'}</td>
         <td class="td-right">${contr > 0 ? pagas : '—'}</td>
@@ -2926,6 +3003,8 @@
         <td class="td-right"><strong>${pct(comprometimentoPct)}</strong></td>
         <td></td>
       </tr>
+      ${dividas.some(d => d.saldoEstimado) ? `<tr><td colspan="8" style="font-size:0.75rem;color:#9a6700;font-weight:400">
+        ≈ saldo <b>estimado</b> a partir da parcela e das parcelas que faltam (valor presente, Tabela Price) — o valor exato deve ser confirmado por extrato ou pelo contrato antes do protocolo.</td></tr>` : ''}
     `;
 
     // ---- Plano de Pagamento Sugerido (com parcela EDITÁVEL) ----
@@ -2956,7 +3035,7 @@
       </div>
       <div style="text-align:center;margin:-6px 0 16px;font-size:0.85rem;color:var(--text-muted)" id="cmpEco">${ecoMensal > 0 ? '💰 Alívio mensal no orçamento: <b style="color:#1e7e34">' + fmtCents(ecoMensal) + '</b> — argumento central para a conciliação (art. 104-A CDC).' : ''}</div>
       <div class="plano-grid">
-        <div class="plano-box"><div class="plano-lbl">Total do passivo</div><div class="plano-val">${fmtCents(totalSaldo)}</div></div>
+        <div class="plano-box"><div class="plano-lbl">Total do passivo</div><div class="plano-val">${fmtCents(totalSaldo)}</div>${dividas.some(d => d.saldoEstimado) ? '<div class="plano-sub" style="color:#9a6700">inclui saldos estimados (≈)</div>' : ''}</div>
         <div class="plano-box"><div class="plano-lbl">Prazo legal máximo</div><div class="plano-val">${PRAZO_MAX} meses</div><div class="plano-sub">art. 104-B, §4º, CDC</div></div>
         <div class="plano-box"><div class="plano-lbl">Parcela p/ quitar em 60 meses</div><div class="plano-val">${fmtCents(parcelaPor60)}</div></div>
         <div class="plano-box"><div class="plano-lbl">Capacidade de pagamento (30%–35%)</div><div class="plano-val">${fmtCents(cap30)} – ${fmtCents(cap35)}</div><div class="plano-sub">da renda líquida (${fmtCents(r.rendaLiquida)})</div></div>
@@ -2968,7 +3047,16 @@
           <div class="plano-sub" id="parcelaEscolhidaInfo">${parcelaSugerida > 0 ? pct(parcelaSugeridaPct) + ' da renda líquida' + (dentroDe30a35 ? ' ✓ (faixa 30–35%)' : '') : 'digite um valor ou use um cenário abaixo'}</div>
           ${parcelaSugerida > 0 ? `<div class="plano-sub"><a href="javascript:void(0)" onclick="usarParcela(PLANO_CTX.parcelaSistema)" style="color:var(--accent-dark,#9a6700);font-weight:700;text-decoration:underline">↩ usar a sugerida (${fmtCents(parcelaSugerida)})</a></div>` : ''}
         </div>
-        <div class="plano-box"><div class="plano-lbl">Prazo estimado com a parcela</div><div class="plano-val" id="planoPrazoVal">${mesesPlano === null ? 'Inviável' : mesesPlano + ' meses'}</div><div class="plano-sub" id="planoRemicaoSub"></div></div>
+        <div class="plano-box">
+          <div class="plano-lbl">✏️ Prazo do plano — editável</div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin:4px 0">
+            <input id="planoPrazoInput" type="text" inputmode="numeric" value="${mesesPlano === null ? '' : mesesPlano}"
+              placeholder="meses" oninput="mascararPrazoPlano(this)" ${totalSaldo <= 0 ? 'disabled' : ''}
+              style="width:84px;text-align:center;font-size:1.15rem;font-weight:800;color:#1a3a5c;border:1.5px dashed #9db8d8;border-radius:8px;padding:6px 8px;background:#fff">
+            <span style="font-weight:700;color:#1a3a5c">meses</span>
+          </div>
+          <div class="plano-sub" id="planoRemicaoSub">${totalSaldo <= 0 ? 'informe os saldos devedores' : 'digite o prazo e a parcela se ajusta'}</div>
+        </div>
       </div>
       <div id="parcelaFeedback"></div>
       <div class="alerta-inline" style="margin-top:14px;background:${planoStatusBg};border-color:${planoStatusCor};color:${planoViavel ? '#1b5e20' : '#7a2218'}">
@@ -3266,7 +3354,20 @@
     aplicarParcelaEscolhida(false, false);
   }
 
-  function aplicarParcelaEscolhida(redistribuir = true, clampar = true) {
+  // Edição do PRAZO → a parcela vira o saldo dividido pelos meses (o inverso do cálculo acima)
+  function mascararPrazoPlano(el) {
+    const m = parseInt((el.value || '').replace(/\D/g, ''), 10);
+    el.value = isNaN(m) ? '' : Math.min(m, 600);
+    if (!PLANO_CTX || PLANO_CTX.totalSaldo <= 0) return;
+    const campo = document.getElementById('parcelaEscolhida');
+    if (!campo || campo.disabled) return;
+    const meses = parseInt(el.value, 10) || 0;
+    campo.value = meses > 0 ? fmtCentsPlain(Math.ceil(PLANO_CTX.totalSaldo / meses)) : '';
+    // não clampa no teto: senão o prazo digitado mudaria sozinho — o aviso abaixo explica o conflito
+    aplicarParcelaEscolhida(true, false, 'prazo');
+  }
+
+  function aplicarParcelaEscolhida(redistribuir = true, clampar = true, origem = 'parcela') {
     if (!PLANO_CTX) return;
     const el = document.getElementById('parcelaEscolhida');
     if (!el) return;
@@ -3280,6 +3381,10 @@
         cents = P.tetoLegal;
         el.value = fmtCentsPlain(cents);
         avisos.push(`⛔ <b>Limite do sistema:</b> a parcela foi ajustada ao teto de ${fmtCents(P.tetoLegal)} — 35% da renda líquida (parâmetro jurisprudencial máximo).`);
+      } else if (origem === 'prazo') {
+        const mesesMin = Math.ceil(P.totalSaldo / P.tetoLegal);
+        avisos.push(`⛔ <b>Prazo curto demais:</b> quitar ${fmtCents(P.totalSaldo)} em ${parseInt((document.getElementById('planoPrazoInput') || {}).value, 10) || 0} meses exigiria parcela de ${fmtCents(cents)}, acima do teto de 35% da renda líquida (${fmtCents(P.tetoLegal)}). ` +
+          `No teto, o prazo mínimo seria de <b>${mesesMin} meses</b>${mesesMin > P.PRAZO_MAX ? ` — acima dos ${P.PRAZO_MAX} legais, o que exige remição do passivo (art. 104-B, §4º, I, CDC)` : ''}.`);
       } else {
         // edição por credor: não clampa (não dá pra saber qual reduzir), mas avisa
         avisos.push(`⛔ <b>Acima do teto legal:</b> a soma das parcelas (${fmtCents(cents)}) supera 35% da renda líquida (${fmtCents(P.tetoLegal)}). Reduza a parcela de algum credor.`);
@@ -3319,8 +3424,8 @@
     // --- Atualiza a tela ---
     document.getElementById('parcelaEscolhidaInfo').innerHTML =
       `${pct(pctRenda)} da renda líquida${naFaixa ? ' ✓ (faixa 30–35%)' : ''}`;
-    const prazoEl = document.getElementById('planoPrazoVal');
-    if (prazoEl) prazoEl.textContent = meses === null ? 'Inviável' : meses + ' meses';
+    const prazoEl = document.getElementById('planoPrazoInput');
+    if (prazoEl && origem !== 'prazo') prazoEl.value = meses === null ? '' : meses;
     const cmpV = document.getElementById('cmpPropVal');
     if (cmpV) cmpV.innerHTML = fmtCents(cents) + '<span style="font-size:.8rem;font-weight:600">/mês</span>';
     const cmpS = document.getElementById('cmpPropSub');
@@ -3332,7 +3437,8 @@
     }
     const remSub = document.getElementById('planoRemicaoSub');
     if (remSub) remSub.textContent = (meses !== null && meses > P.PRAZO_MAX)
-      ? `p/ ${P.PRAZO_MAX} meses: remir ${fmtCents(P.totalSaldo - cents * P.PRAZO_MAX)}` : '';
+      ? `p/ ${P.PRAZO_MAX} meses: remir ${fmtCents(P.totalSaldo - cents * P.PRAZO_MAX)}`
+      : 'digite o prazo e a parcela se ajusta';
     document.getElementById('parcelaFeedback').innerHTML = avisos.length
       ? `<div class="alerta-inline" style="margin-top:12px;background:#f4f8ff;border-color:#9db8d8;color:#1a3a5c;font-size:0.82rem">${avisos.join('<br>')}</div>`
       : '';
@@ -3517,7 +3623,7 @@
     return {
       nomeCaso,
       dados,
-      dividas: dividas.map(d => ({ credor: d.credor, tipo: d.tipo, saldoCents: d.saldoCents, parcelaCents: d.parcelaCents, emFolha: d.emFolha, parcContratadas: d.parcContratadas, parcPagas: d.parcPagas })),
+      dividas: dividas.map(d => ({ credor: d.credor, tipo: d.tipo, saldoCents: d.saldoCents, parcelaCents: d.parcelaCents, emFolha: d.emFolha, parcContratadas: d.parcContratadas, parcPagas: d.parcPagas, jurosMes: d.jurosMes, saldoEstimado: d.saldoEstimado })),
     };
   }
 
@@ -3565,7 +3671,8 @@
     P = PARAMETROS_ANUAIS[ANO] || PARAMETROS_ANUAIS['2026'];
     dividas = [];
     proximoId = 0;
-    (caso.dividas || []).forEach(d => adicionarDivida(d.credor, d.tipo, d.saldoCents, d.parcelaCents, d.emFolha, d.parcContratadas, d.parcPagas));
+    (caso.dividas || []).forEach(d => adicionarDivida(d.credor, d.tipo, d.saldoCents, d.parcelaCents, d.emFolha,
+                                                      d.parcContratadas, d.parcPagas, d.jurosMes, d.saldoEstimado));
     recalcDespesas();
     alternarIR();
     atualizarLabelsAno();
@@ -3632,7 +3739,10 @@
       const parcInfo = contr > 0
         ? ` — contratado em ${contr} parcelas, ${pagas} paga(s) e ${Math.max(contr - pagas, 0)} a vencer`
         : '';
-      return `   ${i + 1}. ${d.credor || 'Credor não identificado'} — ${t.label} — saldo devedor de ${fmtCents(d.saldoCents || 0)}, parcela mensal de ${fmtCents(d.parcelaCents || 0)}${parcInfo}${d.emFolha ? ' (descontada em folha)' : ''};`;
+      const estInfo = d.saldoEstimado
+        ? ` [saldo ESTIMADO pelo valor presente das ${d.saldoEstimado.n} parcelas vincendas à taxa de ${String(d.saldoEstimado.juros).replace('.', ',')}% a.m. — a confirmar por extrato/contrato]`
+        : '';
+      return `   ${i + 1}. ${d.credor || 'Credor não identificado'} — ${t.label} — saldo devedor de ${fmtCents(d.saldoCents || 0)}, parcela mensal de ${fmtCents(d.parcelaCents || 0)}${parcInfo}${d.emFolha ? ' (descontada em folha)' : ''}${estInfo};`;
     }).join('\n');
 
     // Despesas essenciais discriminadas (compõem o mínimo existencial)

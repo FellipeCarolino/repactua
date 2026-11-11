@@ -636,4 +636,69 @@ def test_tela_de_conferencia_leva_o_prazo_para_a_divida():
                              "index.html"), encoding="utf-8").read()
     assert "cfc_tot_" in html and "cfc_pag_" in html
     # os dois campos precisam chegar ao adicionarDivida, senão o prazo lido se perde
-    assert "g('cfc_tot_' + i).value, g('cfc_pag_' + i).value" in html
+    assert "const tot = g('cfc_tot_' + i).value, pag = g('cfc_pag_' + i).value;" in html
+    assert "parcela, true, tot, pag," in html
+
+
+# ---------- Saldo devedor estimado (valor presente das parcelas que faltam) ----------
+def _js_do_index(nomes):
+    """Recorta funções do index.html para rodar no Node — testa a fórmula de verdade,
+    não a presença do texto no arquivo."""
+    html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "index.html"), encoding="utf-8").read()
+    partes = []
+    for nome in nomes:
+        i = html.index("function %s(" % nome)
+        fim, nivel, viu = i, 0, False
+        for j in range(i, len(html)):
+            if html[j] == "{":
+                nivel += 1; viu = True
+            elif html[j] == "}":
+                nivel -= 1
+                if viu and nivel == 0:
+                    fim = j + 1
+                    break
+        partes.append(html[i:fim])
+    return "\n".join(partes)
+
+
+def _node(codigo):
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node não instalado")
+    r = subprocess.run([node, "-e", codigo], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_saldo_estimado_e_o_valor_presente_nao_a_soma_das_parcelas():
+    """1.520,00 x 95 parcelas a 1,8% a.m. = R$ 68.937,29 de saldo HOJE.
+    A soma simples (R$ 144.400) seria o total a pagar e inflaria a dívida na petição."""
+    saida = _node(_js_do_index(["valorPresente"]) +
+                  "\nconsole.log(valorPresente(152000, 95, 1.8), valorPresente(152000, 95, 0));")
+    pv, sem_juros = [int(x) for x in saida.split()]
+    assert pv == 6893729, pv
+    assert sem_juros == 152000 * 95        # sem taxa, cai na soma simples
+    assert pv < sem_juros / 2              # o valor presente é MUITO menor que a soma
+
+
+def test_saldo_estimado_de_uma_unica_parcela_fica_proximo_da_parcela():
+    saida = _node(_js_do_index(["valorPresente"]) + "\nconsole.log(valorPresente(100000, 1, 1.8));")
+    assert 98000 < int(saida) <= 100000     # desconta um mês de juros, nada mais
+
+
+def test_estimativa_aparece_marcada_na_tela_e_na_minuta():
+    html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "index.html"), encoding="utf-8").read()
+    assert "saldo ESTIMADO pelo valor presente" in html, "a minuta precisa ressalvar a estimativa"
+    assert "confirmar por extrato" in html
+    assert "saldoEstimado: d.saldoEstimado" in html, "o caso salvo precisa guardar a marca"
+
+
+def test_prazo_do_plano_e_editavel():
+    html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "index.html"), encoding="utf-8").read()
+    assert 'id="planoPrazoInput"' in html and "mascararPrazoPlano" in html
+    # ao digitar o prazo, a parcela é recalculada e NÃO pode clampar (senão o prazo muda sozinho)
+    assert "aplicarParcelaEscolhida(true, false, 'prazo')" in html
