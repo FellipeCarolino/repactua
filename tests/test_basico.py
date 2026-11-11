@@ -2,6 +2,9 @@
 # Rodar: pytest -q  (usa SQLite local; não toca no Postgres de produção)
 import os
 import sys
+import time
+
+import pytest
 from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -522,3 +525,72 @@ def test_integracoes_exige_token_no_post():
     r = _com_integracoes(api, lambda: c.post("/admin/configurar-webhook", data={}))  # sem token
     assert r.status_code == 302
     assert not any(m in ("POST", "PUT") for m, _ in chamadas)
+
+
+# ---------- Orçamento de tempo da leitura por IA ----------
+class _ErroConexao(server.anthropic.APIConnectionError):
+    """Falha de conexão simulada (sem montar um request real do httpx)."""
+    def __init__(self):
+        Exception.__init__(self, "conexão simulada")
+
+
+class _IAFalsa:
+    """Finge o cliente da IA: registra os timeouts recebidos e sempre falha."""
+    def __init__(self, demora=0.0):
+        self.timeouts, self.chamadas, self.demora = [], 0, demora
+        self.messages = self
+
+    def with_options(self, timeout=None):
+        self.timeouts.append(timeout)
+        return self
+
+    def create(self, **kw):
+        self.chamadas += 1
+        if self.demora:
+            time.sleep(self.demora)
+        raise _ErroConexao()
+
+
+def _com_ia_falsa(fake, orcamento, minimo, fn):
+    reais = (server.client, server.IA_ORCAMENTO_S, server.IA_MINIMO_S, server.IA_TIMEOUT)
+    server.client, server.IA_ORCAMENTO_S, server.IA_MINIMO_S = fake, orcamento, minimo
+    server.IA_TIMEOUT = 60.0
+    try:
+        return fn()
+    finally:
+        (server.client, server.IA_ORCAMENTO_S,
+         server.IA_MINIMO_S, server.IA_TIMEOUT) = reais
+
+
+def test_leitura_para_de_tentar_quando_o_tempo_acaba():
+    """Regressão: em 11/11/2026 a leitura podia durar ~6 min (120s x 3) e o worker morria
+    antes (gunicorn 120s / Cloudflare ~100s), devolvendo resposta quebrada ao navegador."""
+    fake = _IAFalsa(demora=0.12)
+    with pytest.raises(server.anthropic.APIConnectionError):
+        _com_ia_falsa(fake, 0.30, 0.10, lambda: server._chamar_ia({}, "p", {}))
+    assert fake.chamadas < server.IA_TENTATIVAS, (
+        f"tentou {fake.chamadas}x mesmo sem tempo — o worker morreria antes")
+
+
+def test_cada_tentativa_respeita_o_tempo_restante():
+    """O timeout de cada chamada nunca pode passar do que ainda resta do orçamento."""
+    fake = _IAFalsa(demora=0.05)
+    with pytest.raises(server.anthropic.APIConnectionError):
+        _com_ia_falsa(fake, 1.0, 0.1, lambda: server._chamar_ia({}, "p", {}))
+    assert fake.timeouts, "nenhuma chamada registrada"
+    assert all(t <= 1.0 for t in fake.timeouts), fake.timeouts
+    assert fake.timeouts == sorted(fake.timeouts, reverse=True), (
+        f"o tempo deveria diminuir a cada tentativa: {fake.timeouts}")
+
+
+def test_sem_tempo_nenhum_devolve_mensagem_clara():
+    fake = _IAFalsa()
+    with pytest.raises(RuntimeError, match="tempo limite"):
+        _com_ia_falsa(fake, 0.0, 10.0, lambda: server._chamar_ia({}, "p", {}))
+    assert fake.chamadas == 0
+
+
+def test_orcamento_cabe_no_limite_da_infraestrutura():
+    """O orçamento tem de ficar abaixo do corte do Cloudflare (~100s) e do gunicorn (120s)."""
+    assert server.IA_ORCAMENTO_S <= 90, "orçamento perto demais do corte do Cloudflare"
+    assert server.IA_TIMEOUT <= server.IA_ORCAMENTO_S

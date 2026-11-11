@@ -57,7 +57,12 @@ import anthropic
 MODEL = os.environ.get("MODEL_IA", "claude-sonnet-5")
 MAX_TOKENS = 8192       # teto generoso: Registratos com muitas dívidas não truncam (só paga o que gerar)
 MAX_PDF_PAGES = 12
-IA_TIMEOUT = 120.0      # segundos por chamada à IA
+# Orçamento de tempo da leitura. A ordem importa: o Cloudflare corta a conexão por volta de
+# 100s e o gunicorn mata o worker aos 120s — então a leitura TODA (incluindo re-tentativas)
+# precisa caber abaixo disso, senão o worker morre e o navegador recebe resposta quebrada.
+IA_ORCAMENTO_S = 80.0   # tempo total da leitura, somando as tentativas
+IA_TIMEOUT = 60.0       # teto de uma única chamada à IA
+IA_MINIMO_S = 20.0      # abaixo disso não vale tentar de novo: não daria tempo de terminar
 IA_TENTATIVAS = 3       # re-tentativas em erros transitórios (sobrecarga/conexão)
 
 LIMITE_POR_STATUS = {"ativo": 50, "trial": 3, "inativo": 0}
@@ -709,11 +714,21 @@ def _content_block_for_upload(file_storage):
 
 
 def _chamar_ia(bloco, prompt, schema):
-    """Chama a IA com timeout e re-tentativa em erros transitórios (sobrecarga/conexão)."""
+    """Chama a IA dentro de um orçamento de tempo, com re-tentativa em erros transitórios.
+    Cada tentativa usa o menor entre IA_TIMEOUT e o tempo que ainda resta, e só re-tenta se
+    sobrar tempo útil — assim a resposta chega antes de o worker/Cloudflare cortarem."""
+    inicio = time.monotonic()
     ultimo = None
+
+    def _resta():
+        return IA_ORCAMENTO_S - (time.monotonic() - inicio)
+
     for tentativa in range(IA_TENTATIVAS):
+        restante = _resta()
+        if restante < IA_MINIMO_S:
+            break  # sem tempo para outra tentativa: sai e devolve erro amigável
         try:
-            return client.with_options(timeout=IA_TIMEOUT).messages.create(
+            return client.with_options(timeout=min(IA_TIMEOUT, restante)).messages.create(
                 model=MODEL, max_tokens=MAX_TOKENS,
                 messages=[{"role": "user", "content": [bloco, {"type": "text", "text": prompt}]}],
                 output_config={"format": {"type": "json_schema", "schema": schema}},
@@ -721,19 +736,21 @@ def _chamar_ia(bloco, prompt, schema):
         except anthropic.APIStatusError as e:
             ultimo = e
             transitorio = getattr(e, "status_code", 0) in (408, 409, 429, 500, 502, 503, 529)
-            if transitorio and tentativa < IA_TENTATIVAS - 1:
-                time.sleep(1.5 * (tentativa + 1))
+            if transitorio and tentativa < IA_TENTATIVAS - 1 and _resta() > IA_MINIMO_S:
+                time.sleep(min(1.5 * (tentativa + 1), max(_resta() - IA_MINIMO_S, 0)))
                 continue
             raise
         except anthropic.APIConnectionError as e:  # inclui timeouts
             ultimo = e
-            if tentativa < IA_TENTATIVAS - 1:
-                time.sleep(1.5 * (tentativa + 1))
+            if tentativa < IA_TENTATIVAS - 1 and _resta() > IA_MINIMO_S:
+                time.sleep(min(1.5 * (tentativa + 1), max(_resta() - IA_MINIMO_S, 0)))
                 continue
             raise
     if ultimo:
         raise ultimo
-    raise RuntimeError("Não foi possível chamar a IA.")
+    raise RuntimeError(
+        "A leitura deste documento passou do tempo limite. Tente de novo — e, se o arquivo for "
+        "um PDF longo ou uma foto muito pesada, envie só as páginas principais ou uma imagem menor.")
 
 
 def _extrair(prompt, schema, file_storage):
@@ -1750,12 +1767,20 @@ def _endpoint_extrair(prompt, schema, rotulo):
         return jsonify({"ok": False, "erro": erro, "limite": True}), 402
     if "file" not in request.files:
         return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
+    arquivo = request.files["file"]
+    try:  # tamanho só para o log — ajuda a explicar leituras lentas
+        arquivo.stream.seek(0, 2); tam_kb = arquivo.stream.tell() // 1024; arquivo.stream.seek(0)
+    except Exception:
+        tam_kb = -1
+    inicio = time.monotonic()
     try:
-        dados = _extrair(prompt, schema, request.files["file"])
+        dados = _extrair(prompt, schema, arquivo)
         current_user.registrar_consulta()  # só conta consulta quando a leitura dá certo
+        app.logger.info("leitura IA ok (%s): %.1fs, %d KB", rotulo, time.monotonic() - inicio, tam_kb)
         return jsonify({"ok": True, "dados": dados, "restantes": current_user.consultas_restantes()})
     except Exception as e:  # noqa: BLE001
-        app.logger.warning("Falha na leitura IA (%s): %s: %s", rotulo, type(e).__name__, e)
+        app.logger.warning("Falha na leitura IA (%s) após %.1fs, %d KB: %s: %s",
+                           rotulo, time.monotonic() - inicio, tam_kb, type(e).__name__, e)
         return jsonify({"ok": False, "erro": _mensagem_erro_ia(e)}), 500
 
 
