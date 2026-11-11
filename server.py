@@ -3112,7 +3112,7 @@ def _admin_page(titulo, conteudo, ativo="dash", extra_js=""):
         ("fin", "/admin/financeiro", "💰", "Financeiro"),
         ("logs", "/admin/logs", "📜", "Atividades"),
         ("sub", "/admin/subconta", "🏦", "Subconta"),
-        ("wh", "/admin/configurar-webhook", "🔗", "Webhook"),
+        ("wh", "/admin/configurar-webhook", "🔗", "Integrações"),
         ("seg", "/admin/2fa", "🔐", "Segurança"),
         ("calc", "/calculadora", "🧮", "Calculadora"),
     ]
@@ -4081,76 +4081,140 @@ def admin_financeiro():
     return _admin_page("Financeiro", conteudo, "fin", grafico_js)
 
 
+EVENTOS_WEBHOOK = ["PAYMENT_CONFIRMED", "PAYMENT_RECEIVED", "PAYMENT_OVERDUE",
+                   "PAYMENT_DELETED", "PAYMENT_REFUNDED",
+                   # avisos do ciclo de vida da chave de API (inatividade)
+                   "ACCESS_TOKEN_EXPIRING_SOON", "ACCESS_TOKEN_DISABLED", "ACCESS_TOKEN_EXPIRED"]
+URL_WEBHOOK = "https://repactua.com.br/api/asaas-webhook"
+
+
+def _testar_ia():
+    """Chamada mínima à IA só para saber se a chave responde (custo desprezível)."""
+    try:
+        r = client.with_options(timeout=20).messages.create(
+            model=MODEL, max_tokens=4, messages=[{"role": "user", "content": "ok"}])
+        return True, f"respondeu ({getattr(r, 'model', MODEL)})"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:200]}"
+
+
 @app.route("/admin/configurar-webhook", methods=["GET", "POST"])
 def admin_config_webhook():
-    """Confirma a conta Asaas ativa e cria/lista o webhook (usa o ASAAS_API_KEY atual)."""
+    """Diagnóstico das integrações (Asaas, IA, e-mail) e manutenção do webhook."""
     if not _admin_logado():
         return redirect(url_for("admin_login"))
     msg = ""
+
     if request.method == "POST":
+        if not _admin_csrf_ok():
+            return redirect(url_for("admin_login"))
         try:
             try:
                 _em = asaas("GET", "/myAccount").get("email") or ADMIN_EMAIL
             except Exception:
                 _em = ADMIN_EMAIL
-            r = asaas("POST", "/webhooks", {
-                "name": "Repactua",
-                "url": "https://repactua.com.br/api/asaas-webhook",
-                "email": _em,
-                "enabled": True,
-                "interrupted": False,
-                "authToken": ASAAS_WEBHOOK_TOKEN,
-                "sendType": "SEQUENTIALLY",
-                "events": ["PAYMENT_CONFIRMED", "PAYMENT_RECEIVED", "PAYMENT_OVERDUE",
-                           "PAYMENT_DELETED", "PAYMENT_REFUNDED",
-                           # avisos do ciclo de vida da chave de API (inatividade)
-                           "ACCESS_TOKEN_EXPIRING_SOON", "ACCESS_TOKEN_DISABLED",
-                           "ACCESS_TOKEN_EXPIRED"],
-            })
-            msg = f'<div class="ok"><b>Webhook configurado!</b> id: {r.get("id","")}</div>'
+            corpo = {"name": "Repactua", "url": URL_WEBHOOK, "email": _em, "enabled": True,
+                     "interrupted": False, "authToken": ASAAS_WEBHOOK_TOKEN,
+                     "sendType": "SEQUENTIALLY", "events": EVENTOS_WEBHOOK}
+            # Se já existe webhook para esta URL, ATUALIZA (criar outro duplicaria os eventos)
+            atuais = (asaas("GET", "/webhooks").get("data") or [])
+            meu = next((w for w in atuais if (w.get("url") or "").rstrip("/") == URL_WEBHOOK), None)
+            if meu:
+                asaas("PUT", "/webhooks/%s" % meu.get("id"), corpo)
+                msg = '<div class="ok"><b>Webhook atualizado</b> — os avisos de chave entraram, sem duplicar.</div>'
+            else:
+                r = asaas("POST", "/webhooks", corpo)
+                msg = f'<div class="ok"><b>Webhook criado</b> (id {r.get("id","")}).</div>'
+            _log_admin("configurou o webhook do Asaas")
         except Exception as e:
-            msg = f'<div class="erro">Erro ao criar webhook: {str(e)[:400]}</div>'
+            msg = f'<div class="erro">Não deu certo: {str(e)[:400]}</div>'
 
-    # confirma a conta ativa e lista webhooks existentes
+    # --- Asaas: a chave responde? ---
     try:
-        conta = asaas("GET", "/myAccount")
-    except Exception:
-        conta = {}
-    nome = conta.get("name") or conta.get("companyName") or "?"
-    email = conta.get("email") or "?"
-    wallet = conta.get("walletId") or "?"
-    try:
-        whs = asaas("GET", "/webhooks").get("data") or []
-    except Exception:
-        whs = []
-    lista_wh = "".join(f'<li>{w.get("url")} · {"ativo" if w.get("enabled") else "inativo"}</li>' for w in whs) or "<li>(nenhum)</li>"
+        conta = asaas("GET", "/myAccount", timeout=15)
+        asaas_ok, asaas_erro = True, ""
+    except Exception as e:
+        conta, asaas_ok, asaas_erro = {}, False, str(e)[:300]
 
-    html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Webhook · Repactua</title><style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    body{{font-family:'Inter','Segoe UI',sans-serif;background:#f4f6f9;color:#1c2b3a;padding:24px}}
-    .wrap{{max-width:620px;margin:0 auto}} h1{{color:#1a3a5c;font-size:1.3rem}}
-    .card{{background:#fff;border-radius:12px;box-shadow:0 2px 14px rgba(0,0,0,.07);padding:22px;margin-top:14px}}
-    .ok{{background:#e9f7ee;color:#1b5e20;border:1px solid #7ec891;border-radius:8px;padding:12px;margin-bottom:12px;font-size:.88rem}}
-    .erro{{background:#fdecea;color:#7a2218;border:1px solid #e8a49a;border-radius:8px;padding:12px;margin-bottom:12px;font-size:.85rem}}
-    .btn{{background:#bf8f1e;color:#fff;border:none;border-radius:8px;padding:12px 20px;font-weight:700;cursor:pointer;margin-top:8px}}
-    a{{color:#2c5f8a;text-decoration:none}} table td{{padding:5px 8px;font-size:.9rem}} li{{font-size:.85rem;margin:3px 0}}</style></head>
-    <body><div class="wrap"><a href="/admin">← Voltar ao painel</a>
-    <h1 style="margin-top:8px">Configurar webhook da conta Asaas</h1>
+    if asaas_ok:
+        bloco_chave = f"""<div class="ok">✅ <b>Chave do Asaas funcionando.</b></div>
+        <table class="cad"><tbody>
+          <tr><td style="color:#5d6b7b;width:170px">Conta</td><td><b>{conta.get("name") or conta.get("companyName") or "—"}</b></td></tr>
+          <tr><td style="color:#5d6b7b">E-mail</td><td>{conta.get("email") or "—"}</td></tr>
+          <tr><td style="color:#5d6b7b">CNPJ</td><td>{_fmt_documento(conta.get("cpfCnpj"))}</td></tr>
+        </tbody></table>
+        <p class="nota">Esta é a conta-mãe da Sorvezene, usada também pelo Meu Sagrado — o faturamento do
+        Repactua se separa pelo filtro "Assinatura Repactua". Abrir esta tela já conta como uso da chave.</p>"""
+    else:
+        bloco_chave = f"""<div class="erro">❌ <b>A chave do Asaas não está respondendo.</b><br>
+        <span style="font-size:.85rem">{asaas_erro}</span></div>
+        <p class="nota">No Asaas, em <b>Integrações &gt; Chaves de API</b>: se estiver <b>desabilitada</b> (parada por
+        3 meses), dá para reativar ali; se estiver <b>expirada</b> (6 meses), gere outra e atualize
+        ASAAS_API_KEY no Railway. Não mexa na chave do Meu Sagrado.</p>"""
+
+    # --- Webhook: existe e tem todos os eventos? ---
+    linhas_wh, faltando = "", []
+    if asaas_ok:
+        try:
+            whs = asaas("GET", "/webhooks", timeout=15).get("data") or []
+        except Exception:
+            whs = []
+        for w in whs:
+            evs = w.get("events") or []
+            meu = (w.get("url") or "").rstrip("/") == URL_WEBHOOK
+            if meu:
+                faltando = [e for e in EVENTOS_WEBHOOK if e not in evs]
+            estado = ("b-ativo", "ativo") if w.get("enabled") else ("b-inativo", "inativo")
+            linhas_wh += (f'<tr><td>{"👉 " if meu else ""}{w.get("url")}</td>'
+                          f'<td><span class="badge {estado[0]}">{estado[1]}</span></td>'
+                          f'<td style="font-size:.78rem">{len(evs)} evento(s)</td></tr>')
+        if not whs:
+            linhas_wh = '<tr><td colspan="3" style="color:#8a97a5">Nenhum webhook cadastrado.</td></tr>'
+            faltando = EVENTOS_WEBHOOK
+    else:
+        linhas_wh = '<tr><td colspan="3" style="color:#8a97a5">Não dá para listar sem a chave.</td></tr>'
+
+    if asaas_ok and not faltando:
+        aviso_wh = '<div class="ok">✅ O webhook do Repactua está completo — inclusive os avisos de chave.</div>'
+    elif asaas_ok:
+        aviso_wh = ('<div class="erro">⚠️ Faltam avisos neste webhook: <b>'
+                    + ", ".join(faltando) + '</b>. Clique no botão abaixo para corrigir.</div>')
+    else:
+        aviso_wh = ""
+
+    # --- IA e e-mail ---
+    ia_ok, ia_detalhe = _testar_ia()
+    bloco_ia = (f'<div class="ok">✅ <b>IA funcionando</b> — {ia_detalhe}. Modelo: <b>{MODEL}</b>.</div>'
+                if ia_ok else
+                f'<div class="erro">❌ <b>A IA não respondeu</b><br><span style="font-size:.85rem">{ia_detalhe}</span>'
+                '<br>Confira ANTHROPIC_API_KEY no Railway.</div>')
+    bloco_email = ('<div class="ok">✅ <b>Envio de e-mail configurado.</b> '
+                   '<a href="/admin/testar-email">Enviar um teste agora →</a></div>' if email_ativo()
+                   else '<div class="erro">❌ <b>E-mail não configurado</b> — confira RESEND_API_KEY no Railway.</div>')
+
+    tok = _admin_csrf()
+    conteudo = f"""<h1>Integrações</h1>
+    <div class="sub">Estado das conexões com Asaas, IA e e-mail</div>
     {msg}
-    <div class="card">
-      <b>Conta Asaas atual (pela ASAAS_API_KEY):</b>
-      <table><tr><td>Nome</td><td><b>{nome}</b></td></tr>
-      <tr><td>E-mail</td><td>{email}</td></tr>
-      <tr><td>Wallet</td><td style="font-family:monospace;font-size:.82rem">{wallet}</td></tr></table>
-      <p style="font-size:.82rem;color:#5a6a7a;margin-top:8px">Confirme que é a subconta do Repactua (não a conta-mãe).</p>
-    </div>
-    <div class="card">
-      <b>Webhooks cadastrados nesta conta:</b><ul>{lista_wh}</ul>
-      <form method="post"><button class="btn" type="submit">Criar/registrar webhook do Repactua</button></form>
-      <p style="font-size:.8rem;color:#5a6a7a;margin-top:8px">Aponta para https://repactua.com.br/api/asaas-webhook com o token já configurado.</p>
-    </div></div></body></html>"""
-    return Response(html, mimetype="text/html")
+    <h2>Pagamentos (Asaas)</h2>
+    {bloco_chave}
+    <h2>Webhook do Asaas</h2>
+    {aviso_wh}
+    <table><thead><tr><th>Endereço</th><th>Situação</th><th>Eventos</th></tr></thead>
+    <tbody>{linhas_wh}</tbody></table>
+    <form method="post" style="margin-top:14px">
+      <input type="hidden" name="t" value="{tok}">
+      <button class="btn-novo" style="border:none;cursor:pointer">Criar ou atualizar o webhook do Repactua</button>
+    </form>
+    <p class="nota">Aponta para {URL_WEBHOOK}. Se o webhook já existir, ele é <b>atualizado</b> — não cria um segundo.</p>
+    <h2>Leitura por IA</h2>
+    {bloco_ia}
+    <h2>E-mail</h2>
+    {bloco_email}
+    <style>table.cad{{background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-top:10px}}
+    table.cad td{{padding:9px 14px;border-bottom:1px solid #eef1f5;font-size:.9rem}}
+    table.cad tr:last-child td{{border-bottom:none}}</style>"""
+    return _admin_page("Integrações", conteudo, "wh")
 
 
 if __name__ == "__main__":

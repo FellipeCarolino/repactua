@@ -435,3 +435,90 @@ def test_aviso_de_chave_nao_mexe_em_conta():
     _client().post("/api/asaas-webhook", json={
         "event": "ACCESS_TOKEN_EXPIRED", "accessToken": {"id": "t", "enabled": False}})
     assert _estado(oid) == ("ativo", date.today() + timedelta(days=20))
+
+
+# ---------- Tela de Integrações (diagnóstico + manutenção do webhook) ----------
+def _admin_client():
+    uid, email, _ = _usuario_teste(admin=True)
+    c = _client()
+    with c.session_transaction() as s:
+        s["admin_ok"] = True
+        s["admin_email"] = email
+        s["admin_desde"] = server._agora_utc().isoformat()
+        s["admin_csrf"] = "tok"
+    return c
+
+
+def _com_integracoes(fake_asaas, fn):
+    """Executa fn() com o Asaas e o teste de IA simulados (sem chamada externa)."""
+    r_asaas, r_ia, r_key = server.asaas, server._testar_ia, server.ASAAS_API_KEY
+    server.asaas, server.ASAAS_API_KEY = fake_asaas, "chave-de-teste"
+    server._testar_ia = lambda: (True, "simulado")
+    try:
+        return fn()
+    finally:
+        server.asaas, server._testar_ia, server.ASAAS_API_KEY = r_asaas, r_ia, r_key
+
+
+def test_integracoes_avisa_quando_a_chave_do_asaas_falha():
+    def quebrada(metodo, path, payload=None, timeout=None):
+        raise RuntimeError("Asaas 401: unauthorized")
+    c = _admin_client()
+    html = _com_integracoes(quebrada, lambda: c.get("/admin/configurar-webhook")).get_data(as_text=True)
+    assert "não está respondendo" in html
+    assert "Integrações &gt; Chaves de API" in html or "Chaves de API" in html
+
+
+def test_integracoes_aponta_eventos_faltando_no_webhook():
+    def antigo(metodo, path, payload=None, timeout=None):
+        if path == "/myAccount":
+            return {"name": "Sorvezene", "email": "a@b.com", "cpfCnpj": "67028638000101"}
+        if path == "/webhooks":  # webhook sem os avisos de chave
+            return {"data": [{"id": "w1", "url": server.URL_WEBHOOK, "enabled": True,
+                              "events": ["PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"]}]}
+        return {}
+    c = _admin_client()
+    html = _com_integracoes(antigo, lambda: c.get("/admin/configurar-webhook")).get_data(as_text=True)
+    assert "Chave do Asaas funcionando" in html
+    assert "ACCESS_TOKEN_EXPIRING_SOON" in html  # listado como faltando
+
+
+def test_botao_atualiza_webhook_existente_sem_duplicar():
+    """Clicar duas vezes não pode criar um segundo webhook (eventos de pagamento em dobro)."""
+    chamadas = []
+    def api(metodo, path, payload=None, timeout=None):
+        chamadas.append((metodo, path))
+        if path == "/myAccount":
+            return {"email": "a@b.com", "name": "Sorvezene"}
+        if path == "/webhooks" and metodo == "GET":
+            return {"data": [{"id": "w1", "url": server.URL_WEBHOOK, "enabled": True, "events": []}]}
+        return {"id": "w1"}
+    c = _admin_client()
+    r = _com_integracoes(api, lambda: c.post("/admin/configurar-webhook", data={"t": "tok"}))
+    assert r.status_code == 200
+    assert ("PUT", "/webhooks/w1") in chamadas, chamadas
+    assert ("POST", "/webhooks") not in chamadas, "criou outro webhook em vez de atualizar"
+
+
+def test_botao_cria_webhook_quando_nao_existe():
+    chamadas = []
+    def api(metodo, path, payload=None, timeout=None):
+        chamadas.append((metodo, path))
+        if path == "/myAccount":
+            return {"email": "a@b.com"}
+        if path == "/webhooks" and metodo == "GET":
+            return {"data": []}
+        return {"id": "novo"}
+    c = _admin_client()
+    _com_integracoes(api, lambda: c.post("/admin/configurar-webhook", data={"t": "tok"}))
+    assert ("POST", "/webhooks") in chamadas, chamadas
+
+
+def test_integracoes_exige_token_no_post():
+    chamadas = []
+    def api(metodo, path, payload=None, timeout=None):
+        chamadas.append((metodo, path)); return {"data": []}
+    c = _admin_client()
+    r = _com_integracoes(api, lambda: c.post("/admin/configurar-webhook", data={}))  # sem token
+    assert r.status_code == 302
+    assert not any(m in ("POST", "PUT") for m, _ in chamadas)
