@@ -2177,6 +2177,25 @@
     `<input id="${id}" type="text" value="${escHtml(v || '')}" placeholder="—" style="width:100%">`;
   const _inNum = (id, v) =>
     `<input id="${id}" type="number" min="0" value="${v !== null && v !== undefined ? v : ''}" placeholder="—" style="width:100%">`;
+  // Igual ao _inNum, mas estreito (cabe no "024/096") e recalcula o que ainda falta na linha
+  const _inParc = (id, v, i, ph) =>
+    `<input id="${id}" type="number" min="0" value="${v !== null && v !== undefined ? v : ''}" placeholder="${ph}" title="${ph}" oninput="recalcFaltaConsig(${i})" style="width:52px;padding:7px 4px;text-align:center">`;
+
+  function _faltaConsigTxt(total, pagas) {
+    const t = parseInt(total) || 0, pg = parseInt(pagas) || 0;
+    if (t <= 0) return ['—', 'var(--text-muted)'];
+    if (pg > t) return ['confira', 'var(--danger)'];
+    return [(t - pg) + ' a vencer', 'var(--text-muted)'];
+  }
+
+  function recalcFaltaConsig(i) {
+    const g = id => document.getElementById(id);
+    const el = g('cfc_falta_' + i);
+    if (!el) return;
+    const [txt, cor] = _faltaConsigTxt((g('cfc_tot_' + i) || {}).value, (g('cfc_pag_' + i) || {}).value);
+    el.textContent = txt;
+    el.style.color = cor;
+  }
 
   function conferirHolerite(d) {
     // Checagem de sanidade: descontos somados não podem superar a renda bruta (indício de erro de leitura)
@@ -2189,11 +2208,21 @@
         <td style="text-align:center"><input type="checkbox" id="cfc_ok_${i}" checked style="width:18px;height:18px"></td>
         <td>${_inText('cfc_cred_' + i, c.credor || 'Consignado')}</td>
         <td>${_inMoney('cfc_par_' + i, c.parcela)}</td>
+        <td style="white-space:nowrap">
+          <div style="display:flex;align-items:center;gap:4px">
+            ${_inParc('cfc_pag_' + i, c.parcelas_pagas, i, 'pagas')}
+            <span style="color:var(--text-muted)">/</span>
+            ${_inParc('cfc_tot_' + i, c.parcelas_total, i, 'total')}
+          </div>
+          <div id="cfc_falta_${i}" style="font-size:0.72rem;margin-top:3px;color:${_faltaConsigTxt(c.parcelas_total, c.parcelas_pagas)[1]}">${_faltaConsigTxt(c.parcelas_total, c.parcelas_pagas)[0]}</div>
+        </td>
       </tr>`).join('');
     const blocoConsig = (d.consignados || []).length ? `
       <h4 style="font-size:0.85rem;font-weight:700;color:var(--primary);margin:16px 0 8px">Consignados identificados (serão adicionados às dívidas)</h4>
-      <table style="width:100%"><thead><tr><th style="width:60px">Incluir</th><th>Credor</th><th>Parcela/mês</th></tr></thead>
-      <tbody>${consigRows}</tbody></table>` : '';
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px">Se o contracheque mostrar algo como <b>024/096</b>, são <b>24 parcelas pagas</b> de <b>96 contratadas</b> — é essa ordem nos dois campos. Em branco = o documento não trouxe o prazo; preencha se souber.</div>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table style="width:100%;min-width:430px"><thead><tr><th style="width:52px">Incluir</th><th>Credor</th><th style="width:104px">Parcela/mês</th><th style="width:132px">Parcelas pagas / total</th></tr></thead>
+      <tbody>${consigRows}</tbody></table></div>` : '';
     const obs = d.observacoes ? `<div class="alerta-inline" style="margin-top:12px;font-size:0.8rem">💡 <b>Observações da IA:</b> ${escHtml(d.observacoes)}</div>` : '';
     // Situação do IR: nunca deixar cair no "automático" sem querer —
     // p/ isentos (ex.: moléstia grave) o auto descontaria um imposto inexistente e reduziria a margem.
@@ -2281,7 +2310,9 @@
         (d.consignados || []).forEach((c, i) => {
           const ok = g('cfc_ok_' + i);
           if (ok && ok.checked) {
-            adicionarDivida(g('cfc_cred_' + i).value || 'Consignado', 'consignado', 0, parseMoney(g('cfc_par_' + i).value), true);
+            adicionarDivida(g('cfc_cred_' + i).value || 'Consignado', 'consignado', 0,
+                            parseMoney(g('cfc_par_' + i).value), true,
+                            g('cfc_tot_' + i).value, g('cfc_pag_' + i).value);
             n++;
           }
         });

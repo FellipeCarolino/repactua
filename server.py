@@ -568,8 +568,13 @@ SCHEMA_HOLERITE = {
             "type": "array",
             "items": {
                 "type": "object", "additionalProperties": False,
-                "properties": {"credor": {"type": ["string", "null"]}, "parcela": {"type": ["number", "null"]}},
-                "required": ["credor", "parcela"],
+                "properties": {
+                    "credor": {"type": ["string", "null"]},
+                    "parcela": {"type": ["number", "null"]},
+                    "parcelas_total": {"type": ["integer", "null"]},
+                    "parcelas_pagas": {"type": ["integer", "null"]},
+                },
+                "required": ["credor", "parcela", "parcelas_total", "parcelas_pagas"],
             },
         },
         "observacoes": {"type": ["string", "null"]},
@@ -607,7 +612,15 @@ PROMPT_HOLERITE = (
     "'outros_descontos' = soma dos demais descontos obrigatórios/compulsórios que não sejam INSS/PSS, "
     "IRRF, pensão alimentícia ou consignados — ex.: FUSEX/fundo de saúde militar, assistência médica "
     "obrigatória, contribuição sindical, coparticipação de plano de saúde, taxa de ocupação de imóvel funcional. "
-    "'consignados' = empréstimos/cartões consignados e financiamentos descontados em folha (liste credor e parcela). "
+    "'consignados' = empréstimos/cartões consignados e financiamentos descontados em folha. "
+    "Para CADA consignado, extraia o credor, a parcela do mês e, quando o documento informar, "
+    "o prazo do contrato: 'parcelas_total' = número total de parcelas contratadas e "
+    "'parcelas_pagas' = quantas já foram descontadas. Contracheques (sobretudo militares) trazem "
+    "essa informação em colunas como 'PARC', 'PRAZO', 'PRZ', 'QTD', 'Nº PARCELAS' ou num par "
+    "no formato NN/NN — ex.: '024/096' ou '24 de 96' significa que esta é a 24ª parcela de 96, "
+    "logo 'parcelas_pagas' = 24 e 'parcelas_total' = 96 (o MENOR número é o que já correu e o "
+    "MAIOR é o total; se a coluna indicar apenas parcelas RESTANTES, calcule as pagas = total − restantes). "
+    "Se o documento não trouxer o prazo daquele consignado, retorne null nos dois campos — nunca estime. "
     "Em 'observacoes', registre se a folha indica isenção de IR e descontos relevantes que você classificou em 'outros_descontos'. "
     "Valores em reais como número decimal (ex.: 5800.50), sem 'R$' nem separador de milhar. "
     "Se um campo não existir, retorne null. Não invente valores."
@@ -1760,7 +1773,26 @@ def timbre_salvar():
     return jsonify({"ok": True})
 
 
-def _endpoint_extrair(prompt, schema, rotulo):
+def _arrumar_parcelas(dados):
+    """Conserta o par de parcelas lido do contracheque.
+    O prazo costuma vir como "024/096" (24ª parcela de 96). Se a IA trocar a ordem — pagas
+    maiores que o total — o número maior é necessariamente o total contratado. Também
+    descarta valores impossíveis (negativos ou prazos absurdos), para não contaminar a
+    petição com "contratado em 0 parcelas"."""
+    for c in (dados.get("consignados") or []):
+        t, pg = c.get("parcelas_total"), c.get("parcelas_pagas")
+        if isinstance(t, int) and isinstance(pg, int) and pg > t:
+            c["parcelas_total"], c["parcelas_pagas"] = pg, t
+        for k in ("parcelas_total", "parcelas_pagas"):
+            v = c.get(k)
+            if not isinstance(v, int) or v < 0 or v > 600:  # 600 = 50 anos, teto de sanidade
+                c[k] = None
+        if c.get("parcelas_total") is None:  # sem o total, "pagas" sozinho não diz nada
+            c["parcelas_pagas"] = None
+    return dados
+
+
+def _endpoint_extrair(prompt, schema, rotulo, pos=None):
     """Fluxo comum das leituras por IA: valida uso/arquivo, extrai, conta consulta só no sucesso."""
     ok, erro = _checar_uso()
     if not ok:
@@ -1775,6 +1807,8 @@ def _endpoint_extrair(prompt, schema, rotulo):
     inicio = time.monotonic()
     try:
         dados = _extrair(prompt, schema, arquivo)
+        if pos:
+            dados = pos(dados)
         current_user.registrar_consulta()  # só conta consulta quando a leitura dá certo
         app.logger.info("leitura IA ok (%s): %.1fs, %d KB", rotulo, time.monotonic() - inicio, tam_kb)
         return jsonify({"ok": True, "dados": dados, "restantes": current_user.consultas_restantes()})
@@ -1787,7 +1821,7 @@ def _endpoint_extrair(prompt, schema, rotulo):
 @app.route("/api/extract-holerite", methods=["POST"])
 @login_required
 def extract_holerite():
-    return _endpoint_extrair(PROMPT_HOLERITE, SCHEMA_HOLERITE, "holerite")
+    return _endpoint_extrair(PROMPT_HOLERITE, SCHEMA_HOLERITE, "holerite", _arrumar_parcelas)
 
 
 @app.route("/api/extract-contrato", methods=["POST"])

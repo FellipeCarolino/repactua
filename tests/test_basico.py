@@ -594,3 +594,46 @@ def test_orcamento_cabe_no_limite_da_infraestrutura():
     """O orçamento tem de ficar abaixo do corte do Cloudflare (~100s) e do gunicorn (120s)."""
     assert server.IA_ORCAMENTO_S <= 90, "orçamento perto demais do corte do Cloudflare"
     assert server.IA_TIMEOUT <= server.IA_ORCAMENTO_S
+
+
+# ---------- Prazo dos consignados lido do contracheque ----------
+def test_schema_do_holerite_pede_o_prazo_de_cada_consignado():
+    item = server.SCHEMA_HOLERITE["properties"]["consignados"]["items"]
+    assert "parcelas_total" in item["properties"]
+    assert "parcelas_pagas" in item["properties"]
+    # o schema é "strict": todo campo precisa estar em required, senão a IA pode omiti-lo
+    assert set(item["properties"]) == set(item["required"])
+    assert "024/096" in server.PROMPT_HOLERITE, "o prompt precisa explicar o formato NN/NN"
+
+
+def test_parcelas_invertidas_sao_corrigidas():
+    """'024/096' lido ao contrário: o número maior é sempre o total contratado."""
+    d = server._arrumar_parcelas(
+        {"consignados": [{"credor": "SABEMI", "parcela": 2481.83,
+                          "parcelas_total": 24, "parcelas_pagas": 96}]})
+    c = d["consignados"][0]
+    assert (c["parcelas_total"], c["parcelas_pagas"]) == (96, 24)
+
+
+def test_parcelas_absurdas_viram_vazio():
+    d = server._arrumar_parcelas(
+        {"consignados": [{"credor": "A", "parcela": 10, "parcelas_total": 9999, "parcelas_pagas": 3},
+                         {"credor": "B", "parcela": 10, "parcelas_total": None, "parcelas_pagas": 12},
+                         {"credor": "C", "parcela": 10, "parcelas_total": 96, "parcelas_pagas": 24}]}, )
+    a, b, c = d["consignados"]
+    assert a["parcelas_total"] is None          # prazo impossível
+    assert b["parcelas_pagas"] is None          # "pagas" sem total não diz nada
+    assert (c["parcelas_total"], c["parcelas_pagas"]) == (96, 24)   # caso bom não é mexido
+
+
+def test_holerite_sem_consignados_nao_quebra():
+    assert server._arrumar_parcelas({"consignados": None}) == {"consignados": None}
+    assert server._arrumar_parcelas({}) == {}
+
+
+def test_tela_de_conferencia_leva_o_prazo_para_a_divida():
+    html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "index.html"), encoding="utf-8").read()
+    assert "cfc_tot_" in html and "cfc_pag_" in html
+    # os dois campos precisam chegar ao adicionarDivida, senão o prazo lido se perde
+    assert "g('cfc_tot_' + i).value, g('cfc_pag_' + i).value" in html
